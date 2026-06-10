@@ -5,9 +5,11 @@ enum TransactionAnalysisService {
 
     static func analyze(
         rows: [ImportPreviewRow],
-        payeeNotes: [String: PayeeNote] = [:]
+        payeeNotes: [String: PayeeNote] = [:],
+        amountBasis: AmountBasis = .median
     ) -> (suggestions: [BudgetSuggestion], typicalMonth: TypicalMonthSummary) {
         let eligible = rows.filter { $0.budgetType != .transfer }
+        let analysisMonthCount = calendarMonthsSpanned(by: eligible)
         let byMerchant = Dictionary(grouping: eligible) { row in
             let merchant = PayeeNormalization.merchantKey(row.transaction.payee)
             let detail = PayeeNormalization.normalize(row.transaction.payee)
@@ -22,7 +24,12 @@ enum TransactionAnalysisService {
             for cluster in clusters {
                 let minimumCount = minimumOccurrences(for: cluster)
                 guard cluster.count >= minimumCount else { continue }
-                guard let suggestion = detectSuggestion(from: cluster, payeeNotes: payeeNotes) else { continue }
+                guard let suggestion = detectSuggestion(
+                    from: cluster,
+                    payeeNotes: payeeNotes,
+                    analysisMonthCount: analysisMonthCount,
+                    amountBasis: amountBasis
+                ) else { continue }
                 suggestions.append(suggestion)
                 linkedIDs.formUnion(suggestion.linkedTransactionIDs)
             }
@@ -35,7 +42,6 @@ enum TransactionAnalysisService {
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
 
-        let analysisMonthCount = calendarMonthsSpanned(by: eligible)
         let typicalMonth = buildTypicalMonth(
             suggestions: suggestions.filter { !$0.isIgnored },
             remainingRows: eligible.filter { !linkedIDs.contains($0.transaction.id) },
@@ -58,7 +64,9 @@ enum TransactionAnalysisService {
 
     private static func detectSuggestion(
         from rows: [ImportPreviewRow],
-        payeeNotes: [String: PayeeNote]
+        payeeNotes: [String: PayeeNote],
+        analysisMonthCount: Int,
+        amountBasis: AmountBasis
     ) -> BudgetSuggestion? {
         let sorted = rows.sorted { $0.transaction.date < $1.transaction.date }
         let dates = sorted.map(\.transaction.date)
@@ -91,10 +99,11 @@ enum TransactionAnalysisService {
 
         guard cycle != .oneOff else { return nil }
 
-        let monthlyEquivalent = monthlyEquivalentAmount(
-            perOccurrence: medianAmount,
-            cycle: cycle,
-            activeMonthCount: activeMonths.count
+        let perOccurrence = perOccurrenceAmount(amounts: amounts, basis: amountBasis)
+        let totalMinorUnits = amounts.reduce(0, +)
+        let monthlyEquivalent = empiricalMonthlyEquivalent(
+            totalMinorUnits: totalMinorUnits,
+            analysisMonthCount: analysisMonthCount
         )
 
         let confidence: ConfidenceLevel = {
@@ -109,10 +118,11 @@ enum TransactionAnalysisService {
             budgetType: representative.budgetType,
             category: representative.category,
             cycle: cycle,
-            amountMinorUnits: medianAmount,
+            amountMinorUnits: perOccurrence,
             monthlyEquivalentMinorUnits: monthlyEquivalent,
             activeMonths: activeMonths,
             startDate: firstDate,
+            lastPaymentDate: dates.last ?? firstDate,
             confidence: confidence,
             explanation: explanation,
             paymentMethod: paymentMethod,
@@ -163,8 +173,15 @@ enum TransactionAnalysisService {
             }
         }
 
+        if isCalendarMonthlyPattern(dates: sorted),
+           dates.count >= max(2, spanMonths - 1) {
+            return (.monthly, [], "Monthly — \(dates.count) payments across \(spanMonths) months.")
+        }
+
         if let medianInterval = medianOptional(intervals) {
-            if medianInterval >= 25 && medianInterval <= 32 && (annualisedCount >= 12.5 || dates.count >= spanMonths + 1) {
+            if medianInterval >= 25 && medianInterval <= 32
+                && !isCalendarMonthlyPattern(dates: sorted)
+                && (annualisedCount >= 12.5 || dates.count >= spanMonths + 1) {
                 return (.everyFourWeeks, [], "Every 4 weeks — \(dates.count) payments in \(spanMonths) months (~\(Int(annualisedCount.rounded())) per year).")
             }
 
@@ -185,7 +202,9 @@ enum TransactionAnalysisService {
             return (.monthly, [], "Monthly — appears most months in the data.")
         }
 
-        if budgetType == .income && dates.count >= 3 && (hintsFourWeekly(payee: payee) || annualisedCount >= 12) {
+        if budgetType == .income && dates.count >= 3
+            && !isCalendarMonthlyPattern(dates: sorted)
+            && (hintsFourWeekly(payee: payee) || annualisedCount >= 12) {
             return (.everyFourWeeks, [], "Regular income — likely every 4 weeks (\(dates.count) payments).")
         }
 
@@ -209,6 +228,25 @@ enum TransactionAnalysisService {
             || payee.contains("SEB PENSION")
             || payee.contains("DWP")
             || payee.contains("PENSI")
+    }
+
+    /// One payment per calendar month on a consistent day (±3 days for weekends/holidays).
+    private static func isCalendarMonthlyPattern(dates: [Date]) -> Bool {
+        guard dates.count >= 2 else { return false }
+        let sorted = dates.sorted()
+
+        var seenYearMonths = Set<String>()
+        for date in sorted {
+            let year = calendar.component(.year, from: date)
+            let month = calendar.component(.month, from: date)
+            let key = "\(year)-\(month)"
+            if seenYearMonths.contains(key) { return false }
+            seenYearMonths.insert(key)
+        }
+
+        let days = sorted.map { calendar.component(.day, from: $0) }
+        let anchor = median(days)
+        return days.allSatisfy { abs($0 - anchor) <= 3 }
     }
 
     private static func isTenMonthlyPattern(
@@ -274,6 +312,11 @@ enum TransactionAnalysisService {
         return summary
     }
 
+    static func empiricalMonthlyEquivalent(totalMinorUnits: Int, analysisMonthCount: Int) -> Int {
+        guard analysisMonthCount > 0 else { return totalMinorUnits }
+        return totalMinorUnits / analysisMonthCount
+    }
+
     static func monthlyEquivalentAmount(
         perOccurrence: Int,
         cycle: BudgetCycleType,
@@ -306,6 +349,15 @@ enum TransactionAnalysisService {
         guard let first = dates.min(), let last = dates.max() else { return 1 }
         let components = calendar.dateComponents([.month], from: first, to: last)
         return max(1, (components.month ?? 0) + 1)
+    }
+
+    private static func perOccurrenceAmount(amounts: [Int], basis: AmountBasis) -> Int {
+        switch basis {
+        case .median:
+            return median(amounts)
+        case .latest:
+            return amounts.last ?? 0
+        }
     }
 
     private static func median(_ values: [Int]) -> Int {

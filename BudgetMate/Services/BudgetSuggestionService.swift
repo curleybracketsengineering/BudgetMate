@@ -22,6 +22,7 @@ enum BudgetSuggestionService {
             rule.commitment = .known
             rule.assumptionsNotes = combinedAssumptionsNotes(for: suggestion)
             rule.isActive = true
+            rule.monthlyEquivalentMinorUnits = BudgetRuleService.calculatedMonthlyEquivalent(for: rule)
             rule.markCreated()
             context.insert(rule)
         }

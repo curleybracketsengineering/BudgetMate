@@ -4,6 +4,7 @@ import SwiftData
 struct BankAccountFormView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query private var settingsList: [AppSettings]
 
     let currency: AppCurrency
     var existingAccount: BankAccount?
@@ -12,32 +13,62 @@ struct BankAccountFormView: View {
     @State private var startingBalanceText = "0.00"
     @State private var importAlias = ""
 
+    private var isPrimary: Bool { existingAccount?.isPrimary == true }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section("Account") {
-                    TextField("Name", text: $name)
-                    TextField("Starting balance", text: $startingBalanceText)
-                    TextField("Import alias (optional)", text: $importAlias)
-                    Text("If your bank CSV uses a different account name, enter it here to auto-match imports.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if isPrimary {
+                        LabeledContent("Name") {
+                            Text(name)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        TextField("Name", text: $name)
+                    }
+
+                    LabeledContent("Starting balance") {
+                        CurrencyAmountField(currency: currency, text: $startingBalanceText)
+                    }
+
+                    if !isPrimary {
+                        TextField("Import alias (optional)", text: $importAlias)
+                        Text("If your bank CSV uses a different account name, enter it here to auto-match imports.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if isPrimary {
+                    Section {
+                        Text("This is your default account for income and expenses. You can also edit the starting balance in Settings → Planning.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle(existingAccount == nil ? "New Account" : "Edit Account")
+            .navigationTitle(navigationTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(!isPrimary && name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
             .onAppear { loadExisting() }
         }
-        .frame(minWidth: 400, minHeight: 280)
+        .frame(minWidth: 400, minHeight: isPrimary ? 240 : 280)
+    }
+
+    private var navigationTitle: String {
+        if isPrimary {
+            return "Main Account"
+        }
+        return existingAccount == nil ? "New Account" : "Edit Account"
     }
 
     private func loadExisting() {
@@ -62,10 +93,19 @@ struct BankAccountFormView: View {
             modelContext.insert(account)
         }
 
-        account.name = name.trimmingCharacters(in: .whitespaces)
-        account.startingBalanceMinorUnits = MoneyFormatter.parseMajorUnits(startingBalanceText, currency: currency) ?? 0
-        account.importAlias = importAlias.trimmingCharacters(in: .whitespaces)
+        if !isPrimary {
+            account.name = name.trimmingCharacters(in: .whitespaces)
+            account.importAlias = importAlias.trimmingCharacters(in: .whitespaces)
+        }
+
+        let startingBalance = MoneyFormatter.parseMajorUnits(startingBalanceText, currency: currency) ?? 0
+        account.startingBalanceMinorUnits = startingBalance
         account.markUpdated()
+
+        if isPrimary, let settings = settingsList.first {
+            settings.startingBalanceMinorUnits = startingBalance
+            settings.markUpdated()
+        }
 
         do {
             try AppDataService.refreshForecast(in: modelContext)

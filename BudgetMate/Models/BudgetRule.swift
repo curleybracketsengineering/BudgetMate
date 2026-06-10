@@ -8,6 +8,8 @@ final class BudgetRule {
     var typeRaw: String = BudgetType.expense.rawValue
     var category: String = ""
     var amountMinorUnits: Int = 0
+    /// Per-month impact from import analysis, or cycle-derived when created/edited manually. Zero uses cycle calculation.
+    var monthlyEquivalentMinorUnits: Int = 0
     var cycleRaw: String = BudgetCycleType.monthly.rawValue
     var startDate: Date = Date()
     var endDate: Date?

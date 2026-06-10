@@ -24,6 +24,9 @@ struct BudgetRuleFormView: View {
     @State private var selectedMonths: Set<Int> = []
     @State private var linkedAccountId: UUID?
     @State private var transferToAccountId: UUID?
+    @State private var loadedAmountMinorUnits = 0
+    @State private var loadedCycle: BudgetCycleType = .monthly
+    @State private var loadedMonthPatternRaw = ""
 
     var body: some View {
         NavigationStack {
@@ -122,6 +125,9 @@ struct BudgetRuleFormView: View {
             selectedMonths = BudgetRuleService.parseMonthPattern(rule.monthPatternRaw)
             linkedAccountId = rule.linkedAccountId
             transferToAccountId = rule.transferToAccountId
+            loadedAmountMinorUnits = rule.amountMinorUnits
+            loadedCycle = rule.cycle
+            loadedMonthPatternRaw = rule.monthPatternRaw
             return
         }
 
@@ -160,9 +166,17 @@ struct BudgetRuleFormView: View {
         rule.assumptionsNotes = assumptionsNotes
         rule.linkedAccountId = linkedAccountId
         rule.transferToAccountId = type == .transfer ? transferToAccountId : nil
-        rule.monthPatternRaw = cycle == .tenMonthly
+        let monthPatternRaw = cycle == .tenMonthly
             ? BudgetRuleService.formatMonthPattern(selectedMonths)
             : ""
+        rule.monthPatternRaw = monthPatternRaw
+
+        let amountChanged = existingRule != nil && amount != loadedAmountMinorUnits
+        let scheduleChanged = existingRule != nil && (cycle != loadedCycle || monthPatternRaw != loadedMonthPatternRaw)
+        if existingRule == nil || amountChanged || scheduleChanged {
+            rule.monthlyEquivalentMinorUnits = BudgetRuleService.calculatedMonthlyEquivalent(for: rule)
+        }
+
         rule.markUpdated()
 
         do {

@@ -3,6 +3,7 @@ import SwiftUI
 struct BudgetSuggestionsSection: View {
     @Binding var suggestions: [BudgetSuggestion]
     @Binding var flowFocus: ImportFlowFocus
+    @Binding var amountBasis: AmountBasis
     let typicalMonth: TypicalMonthSummary
     let currency: AppCurrency
     let totalIncomingCount: Int
@@ -51,7 +52,6 @@ struct BudgetSuggestionsSection: View {
                             transactionCount: totalIncomingCount
                         ),
                         tint: .green,
-                        monthlyTotal: incomingMonthlyTotal,
                         suggestionIDs: incomingSuggestions.map(\.id),
                         emptyMessage: totalIncomingCount == 0
                             ? "No income transactions in this import."
@@ -68,7 +68,6 @@ struct BudgetSuggestionsSection: View {
                             transactionCount: totalOutgoingCount
                         ),
                         tint: .red,
-                        monthlyTotal: outgoingMonthlyTotal,
                         suggestionIDs: outgoingSuggestions.map(\.id),
                         emptyMessage: totalOutgoingCount == 0
                             ? "No outgoing transactions in this import."
@@ -154,6 +153,31 @@ struct BudgetSuggestionsSection: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
             }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Per payment basis")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Picker("Per payment basis", selection: $amountBasis) {
+                    ForEach(AmountBasis.allCases) { basis in
+                        Text(basis.displayName).tag(basis)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Text(amountBasisHelpText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var amountBasisHelpText: String {
+        switch amountBasis {
+        case .median:
+            "Median uses the middle payment across this import — stable when amounts vary slightly."
+        case .latest:
+            "Latest uses your most recent payment — useful when costs are rising."
         }
     }
 
@@ -202,20 +226,11 @@ struct BudgetSuggestionsSection: View {
         }
     }
 
-    private var incomingMonthlyTotal: Int {
-        incomingSuggestions.reduce(0) { $0 + $1.monthlyEquivalentMinorUnits }
-    }
-
-    private var outgoingMonthlyTotal: Int {
-        outgoingSuggestions.reduce(0) { $0 + $1.monthlyEquivalentMinorUnits }
-    }
-
     @ViewBuilder
     private func suggestionPanel(
         title: String,
         subtitle: String,
         tint: Color,
-        monthlyTotal: Int,
         suggestionIDs: [UUID],
         emptyMessage: String
     ) -> some View {
@@ -229,13 +244,9 @@ struct BudgetSuggestionsSection: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(suggestionIDs.count) items")
-                        .font(.caption.weight(.medium))
-                    Text("\(MoneyFormatter.format(minorUnits: monthlyTotal, currency: currency)) / month")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(tint)
-                }
+                Text("\(suggestionIDs.count) items")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
             }
 
             if suggestionIDs.isEmpty {
@@ -248,6 +259,7 @@ struct BudgetSuggestionsSection: View {
                 SuggestionsListTable(
                     suggestions: $suggestions,
                     currency: currency,
+                    amountBasis: amountBasis,
                     includedIDs: Set(suggestionIDs),
                     offerUndo: offerUndo,
                     onInspect: { inspectedSuggestion = InspectedSuggestion(id: $0) },
@@ -270,6 +282,7 @@ struct BudgetSuggestionsSection: View {
 private struct SuggestionsListTable: View {
     @Binding var suggestions: [BudgetSuggestion]
     let currency: AppCurrency
+    let amountBasis: AmountBasis
     let includedIDs: Set<UUID>
     let offerUndo: (String, @escaping () -> Void) -> Void
     let onInspect: (UUID) -> Void
@@ -277,7 +290,7 @@ private struct SuggestionsListTable: View {
 
     var body: some View {
         LazyVStack(spacing: 0) {
-            SuggestionRowHeader()
+            SuggestionRowHeader(amountBasis: amountBasis)
             Divider()
             ForEach($suggestions) { $suggestion in
                 if includedIDs.contains(suggestion.id) && !suggestion.isIgnored {
@@ -285,6 +298,7 @@ private struct SuggestionsListTable: View {
                         suggestion: $suggestion,
                         suggestions: $suggestions,
                         currency: currency,
+                        amountBasis: amountBasis,
                         offerUndo: offerUndo,
                         onInspect: { onInspect(suggestion.id) },
                         onEditPayeeNote: { onEditPayeeNote(suggestion) }
@@ -299,6 +313,8 @@ private struct SuggestionsListTable: View {
 }
 
 private struct SuggestionRowHeader: View {
+    let amountBasis: AmountBasis
+
     var body: some View {
         HStack(spacing: 10) {
             Text("Save")
@@ -307,10 +323,10 @@ private struct SuggestionRowHeader: View {
                 .frame(minWidth: 160, maxWidth: .infinity, alignment: .leading)
             Text("Cycle")
                 .frame(width: 100, alignment: .leading)
-            Text("Per payment")
+            Text("Last paid")
+                .frame(width: 72, alignment: .leading)
+            Text(amountBasis.perPaymentColumnTitle)
                 .frame(width: 100, alignment: .trailing)
-            Text("Per month")
-                .frame(width: 88, alignment: .trailing)
             Text("Count")
                 .frame(width: 40, alignment: .trailing)
             Text("")
@@ -327,15 +343,21 @@ private struct BudgetSuggestionRowView: View {
     @Binding var suggestion: BudgetSuggestion
     @Binding var suggestions: [BudgetSuggestion]
     let currency: AppCurrency
+    let amountBasis: AmountBasis
     let offerUndo: (String, @escaping () -> Void) -> Void
     let onInspect: () -> Void
     let onEditPayeeNote: () -> Void
 
     private var perPaymentLabel: String {
-        if suggestion.hasAmountVariance {
-            return "\(MoneyFormatter.format(minorUnits: suggestion.amountMinMinorUnits, currency: currency)) – \(MoneyFormatter.format(minorUnits: suggestion.amountMaxMinorUnits, currency: currency))"
+        switch amountBasis {
+        case .latest:
+            return MoneyFormatter.format(minorUnits: suggestion.amountMinorUnits, currency: currency)
+        case .median:
+            if suggestion.hasAmountVariance {
+                return "\(MoneyFormatter.format(minorUnits: suggestion.amountMinMinorUnits, currency: currency)) – \(MoneyFormatter.format(minorUnits: suggestion.amountMaxMinorUnits, currency: currency))"
+            }
+            return MoneyFormatter.format(minorUnits: suggestion.amountMinorUnits, currency: currency)
         }
-        return MoneyFormatter.format(minorUnits: suggestion.amountMinorUnits, currency: currency)
     }
 
     var body: some View {
@@ -403,16 +425,17 @@ private struct BudgetSuggestionRowView: View {
                     .frame(width: 100, alignment: .leading)
                     .lineLimit(2)
 
+                Text(suggestion.lastPaymentDate.formatted(.dateTime.month(.abbreviated).year()))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 72, alignment: .leading)
+                    .lineLimit(1)
+
                 Text(perPaymentLabel)
                     .font(.caption.monospacedDigit())
                     .frame(width: 100, alignment: .trailing)
                     .lineLimit(2)
                     .multilineTextAlignment(.trailing)
-
-                Text(MoneyFormatter.format(minorUnits: suggestion.monthlyEquivalentMinorUnits, currency: currency))
-                    .font(.caption.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(suggestion.budgetType == .income ? .green : .primary)
-                    .frame(width: 88, alignment: .trailing)
 
                 Text("\(suggestion.transactionCount)")
                     .font(.caption.weight(.medium))

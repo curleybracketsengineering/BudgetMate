@@ -19,8 +19,17 @@ struct SettingsView: View {
     @State private var didLoad = false
     @State private var showingNewAccount = false
     @State private var editingAccount: BankAccount?
+    @FocusState private var focusedMoneyField: MoneyField?
 
     private var settings: AppSettings? { settingsList.first }
+
+    private enum MoneyField: Hashable {
+        case startingBalance
+        case safeThreshold
+        case warningThreshold
+        case criticalThreshold
+        case largePayment
+    }
 
     var body: some View {
         Form {
@@ -42,10 +51,15 @@ struct SettingsView: View {
         .onChange(of: planningStartYear) { save(settings) }
         .onChange(of: horizonMonths) { save(settings) }
         .onChange(of: currency) { save(settings) }
+        .onChange(of: focusedMoneyField) { previous, _ in
+            if previous != nil {
+                save(settings)
+            }
+        }
         .sheet(isPresented: $showingNewAccount) {
             BankAccountFormView(currency: currency)
         }
-        .sheet(item: $editingAccount) { account in
+        .sheet(item: $editingAccount, onDismiss: reloadStartingBalanceFromStore) { account in
             BankAccountFormView(currency: currency, existingAccount: account)
         }
     }
@@ -55,11 +69,7 @@ struct SettingsView: View {
         Section("Bank accounts") {
             ForEach(accounts) { account in
                 Button {
-                    if account.isPrimary {
-                        // Primary account balance is edited in Planning section.
-                    } else {
-                        editingAccount = account
-                    }
+                    editingAccount = account
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -76,13 +86,16 @@ struct SettingsView: View {
                             Text(MoneyFormatter.format(minorUnits: account.startingBalanceMinorUnits, currency: currency))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            if account.isPrimary {
+                                Text("Tap to edit, or change in Planning below.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
                         Spacer()
-                        if !account.isPrimary {
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
                     }
                 }
                 .buttonStyle(.plain)
@@ -103,12 +116,7 @@ struct SettingsView: View {
     @ViewBuilder
     private func planningSection(_ settings: AppSettings) -> some View {
         Section("Planning") {
-            Picker("Start month", selection: $planningStartMonth) {
-                ForEach(1...12, id: \.self) { m in
-                    Text(Calendar.current.monthSymbols[m - 1]).tag(m)
-                }
-            }
-            Stepper("Start year: \(planningStartYear)", value: $planningStartYear, in: 2020...2100)
+            PlanningStartPicker(month: $planningStartMonth, year: $planningStartYear)
 
             Picker("Horizon", selection: $horizonMonths) {
                 ForEach(featureGate.allowedHorizons(), id: \.self) { h in
@@ -117,13 +125,11 @@ struct SettingsView: View {
             }
             .disabled(!featureGate.isProUnlocked && horizonMonths == 12)
 
-            HStack {
-                Text("Starting balance")
-                Spacer()
-                TextField("0.00", text: $startingBalanceText)
-                    .frame(width: 120)
-                    .multilineTextAlignment(.trailing)
-                    .onSubmit { save(settings) }
+            LabeledContent("Starting balance") {
+                CurrencyAmountField(currency: currency, text: $startingBalanceText) {
+                    save(settings)
+                }
+                .focused($focusedMoneyField, equals: .startingBalance)
             }
             Text("Opening balance for your Main account.")
                 .font(.caption)
@@ -134,10 +140,10 @@ struct SettingsView: View {
     @ViewBuilder
     private func thresholdsSection(_ settings: AppSettings) -> some View {
         Section("Balance thresholds") {
-            thresholdField("Safe", text: $safeThresholdText, settings: settings)
-            thresholdField("Warning", text: $warningThresholdText, settings: settings)
-            thresholdField("Critical", text: $criticalThresholdText, settings: settings)
-            thresholdField("Large payment", text: $largePaymentText, settings: settings)
+            thresholdField("Safe", focus: .safeThreshold, text: $safeThresholdText, settings: settings)
+            thresholdField("Warning", focus: .warningThreshold, text: $warningThresholdText, settings: settings)
+            thresholdField("Critical", focus: .criticalThreshold, text: $criticalThresholdText, settings: settings)
+            thresholdField("Large payment", focus: .largePayment, text: $largePaymentText, settings: settings)
         }
     }
 
@@ -182,15 +188,26 @@ struct SettingsView: View {
         }
     }
 
-    private func thresholdField(_ label: String, text: Binding<String>, settings: AppSettings) -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            TextField("0.00", text: text)
-                .frame(width: 120)
-                .multilineTextAlignment(.trailing)
-                .onSubmit { save(settings) }
+    private func thresholdField(
+        _ label: String,
+        focus: MoneyField,
+        text: Binding<String>,
+        settings: AppSettings
+    ) -> some View {
+        LabeledContent(label) {
+            CurrencyAmountField(currency: currency, text: text) {
+                save(settings)
+            }
+            .focused($focusedMoneyField, equals: focus)
         }
+    }
+
+    private func reloadStartingBalanceFromStore() {
+        guard let settings else { return }
+        startingBalanceText = MoneyFormatter.majorUnitsString(
+            minorUnits: settings.startingBalanceMinorUnits,
+            currency: currency
+        )
     }
 
     private func loadFromSettings() {

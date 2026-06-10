@@ -11,18 +11,6 @@ struct CreateBudgetRulesConfirmationSheet: View {
         suggestions.reduce(0) { $0 + $1.transactionCount }
     }
 
-    private var incomingMonthlyTotal: Int {
-        suggestions
-            .filter { $0.budgetType == .income }
-            .reduce(0) { $0 + $1.monthlyEquivalentMinorUnits }
-    }
-
-    private var outgoingMonthlyTotal: Int {
-        suggestions
-            .filter { $0.budgetType == .expense || $0.budgetType == .saving }
-            .reduce(0) { $0 + $1.monthlyEquivalentMinorUnits }
-    }
-
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 0) {
@@ -73,25 +61,6 @@ struct CreateBudgetRulesConfirmationSheet: View {
                 }
             }
             .font(.subheadline)
-
-            if incomingMonthlyTotal > 0 || outgoingMonthlyTotal > 0 {
-                HStack(spacing: 16) {
-                    if incomingMonthlyTotal > 0 {
-                        monthlySummary(
-                            title: "Income / month",
-                            amount: incomingMonthlyTotal,
-                            tint: .green
-                        )
-                    }
-                    if outgoingMonthlyTotal > 0 {
-                        monthlySummary(
-                            title: "Outgoing / month",
-                            amount: outgoingMonthlyTotal,
-                            tint: .red
-                        )
-                    }
-                }
-            }
         }
     }
 
@@ -117,8 +86,8 @@ struct CreateBudgetRulesConfirmationSheet: View {
                 .frame(minWidth: 140, maxWidth: .infinity, alignment: .leading)
             Text("Cycle")
                 .frame(width: 100, alignment: .leading)
-            Text("Per month")
-                .frame(width: 88, alignment: .trailing)
+            Text("Payment")
+                .frame(width: 100, alignment: .trailing)
             Text("Txns")
                 .frame(width: 40, alignment: .trailing)
         }
@@ -147,10 +116,10 @@ struct CreateBudgetRulesConfirmationSheet: View {
                 .frame(width: 100, alignment: .leading)
                 .lineLimit(2)
 
-            Text(MoneyFormatter.format(minorUnits: suggestion.monthlyEquivalentMinorUnits, currency: currency))
+            Text(MoneyFormatter.format(minorUnits: suggestion.amountMinorUnits, currency: currency))
                 .font(.caption.monospacedDigit().weight(.semibold))
                 .foregroundStyle(suggestion.budgetType == .income ? .green : .primary)
-                .frame(width: 88, alignment: .trailing)
+                .frame(width: 100, alignment: .trailing)
 
             Text("\(suggestion.transactionCount)")
                 .font(.caption.weight(.medium))
@@ -171,14 +140,4 @@ struct CreateBudgetRulesConfirmationSheet: View {
         }
     }
 
-    private func monthlySummary(title: String, amount: Int, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(MoneyFormatter.format(minorUnits: amount, currency: currency))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(tint)
-        }
-    }
 }

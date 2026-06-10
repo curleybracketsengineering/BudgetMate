@@ -42,6 +42,13 @@ enum BudgetRuleService {
     }
 
     static func monthlyEquivalent(for rule: BudgetRule) -> Int {
+        if rule.monthlyEquivalentMinorUnits > 0 {
+            return rule.monthlyEquivalentMinorUnits
+        }
+        return calculatedMonthlyEquivalent(for: rule)
+    }
+
+    static func calculatedMonthlyEquivalent(for rule: BudgetRule) -> Int {
         TransactionAnalysisService.monthlyEquivalentAmount(
             perOccurrence: rule.amountMinorUnits,
             cycle: rule.cycle,

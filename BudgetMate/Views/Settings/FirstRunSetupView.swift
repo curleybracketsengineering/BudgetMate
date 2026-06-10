@@ -26,13 +26,8 @@ struct FirstRunSetupView: View {
                     }
                 }
 
-                Section("Planning start") {
-                    Picker("Month", selection: $planningStartMonth) {
-                        ForEach(1...12, id: \.self) { m in
-                            Text(Calendar.current.monthSymbols[m - 1]).tag(m)
-                        }
-                    }
-                    Stepper("Year: \(planningStartYear)", value: $planningStartYear, in: 2020...2100)
+                Section {
+                    PlanningStartPicker(month: $planningStartMonth, year: $planningStartYear)
                 }
 
                 Section("Starting balance") {

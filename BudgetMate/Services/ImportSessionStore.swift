@@ -14,6 +14,7 @@ final class ImportSessionStore {
     var importMessage: String?
     var flowFocus: ImportFlowFocus = .incoming
     var payeeNotes: [String: PayeeNote] = [:]
+    var amountBasis: AmountBasis = .median
 
     var hasLoadedFile: Bool {
         !previewRows.isEmpty || importedFileName != nil
@@ -51,7 +52,11 @@ final class ImportSessionStore {
     }
 
     func refreshAnalysis() {
-        let result = TransactionAnalysisService.analyze(rows: previewRows, payeeNotes: payeeNotes)
+        let result = TransactionAnalysisService.analyze(
+            rows: previewRows,
+            payeeNotes: payeeNotes,
+            amountBasis: amountBasis
+        )
         budgetSuggestions = mergeSuggestions(existing: budgetSuggestions, fresh: result.suggestions)
         typicalMonth = result.typicalMonth
     }

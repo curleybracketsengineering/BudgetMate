@@ -8,10 +8,11 @@ struct BudgetSuggestion: Identifiable, Hashable {
     var cycle: BudgetCycleType
     /// Amount per occurrence (what appears on each payment).
     var amountMinorUnits: Int
-    /// Typical monthly impact across a full year.
+    /// Average monthly impact across the imported date range (total paid ÷ months in import).
     var monthlyEquivalentMinorUnits: Int
     var activeMonths: [Int]
     var startDate: Date
+    var lastPaymentDate: Date
     var confidence: ConfidenceLevel
     var explanation: String
     var paymentMethod: String
@@ -35,6 +36,7 @@ struct BudgetSuggestion: Identifiable, Hashable {
         monthlyEquivalentMinorUnits: Int,
         activeMonths: [Int] = [],
         startDate: Date,
+        lastPaymentDate: Date? = nil,
         confidence: ConfidenceLevel,
         explanation: String,
         paymentMethod: String = "Other",
@@ -57,6 +59,7 @@ struct BudgetSuggestion: Identifiable, Hashable {
         self.monthlyEquivalentMinorUnits = monthlyEquivalentMinorUnits
         self.activeMonths = activeMonths
         self.startDate = startDate
+        self.lastPaymentDate = lastPaymentDate ?? startDate
         self.confidence = confidence
         self.explanation = explanation
         self.paymentMethod = paymentMethod

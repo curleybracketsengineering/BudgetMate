@@ -157,6 +157,7 @@ struct ImportsView: View {
                     BudgetSuggestionsSection(
                         suggestions: Bindable(importSession).budgetSuggestions,
                         flowFocus: Bindable(importSession).flowFocus,
+                        amountBasis: Bindable(importSession).amountBasis,
                         typicalMonth: importSession.typicalMonth,
                         currency: currency,
                         totalIncomingCount: incomingTransactionCount,
@@ -182,6 +183,9 @@ struct ImportsView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: pendingUndo?.message)
+            .onChange(of: importSession.amountBasis) {
+                importSession.refreshAnalysis()
+            }
         }
     }
 
