@@ -48,6 +48,48 @@ struct ImportsView: View {
         PayeeNoteService.index(payeeNotes)
     }
 
+    private var acceptedRulesCount: Int {
+        importSession.budgetSuggestions.filter(\.isAccepted).count
+    }
+
+    private var hasSelectableSuggestions: Bool {
+        importSession.budgetSuggestions.contains { !$0.isIgnored }
+    }
+
+    private var rulesWereSaved: Bool {
+        importSession.importMessage?.localizedCaseInsensitiveContains("budget rule") == true
+    }
+
+    private var workflowSteps: [ImportWorkflowStep] {
+        let step1: ImportWorkflowStep.State = importSession.hasLoadedFile ? .complete : .current
+        let step2: ImportWorkflowStep.State = {
+            guard importSession.hasLoadedFile else { return .upcoming }
+            if rulesWereSaved || !hasSelectableSuggestions { return .complete }
+            return .current
+        }()
+        let step3: ImportWorkflowStep.State = {
+            guard importSession.hasLoadedFile else { return .upcoming }
+            if importSession.previewRows.isEmpty && rulesWereSaved { return .complete }
+            return canImport ? .current : .upcoming
+        }()
+        let step2Subtitle: String = {
+            if rulesWereSaved { return "Rules saved to Budget Rules" }
+            if acceptedRulesCount > 0 { return "\(acceptedRulesCount) selected — press Create budget rules" }
+            if !hasSelectableSuggestions { return "No recurring patterns found" }
+            return "Tick incoming & outgoing items below"
+        }()
+        let step3Subtitle: String = {
+            if step3 == .complete { return "Tiles added to monthly plan" }
+            if canImport { return "Press Import \(importSession.previewRows.count) tiles" }
+            return "Add to monthly plan"
+        }()
+        return [
+            ImportWorkflowStep(number: 1, title: "Import document", subtitle: "Choose bank export", state: step1),
+            ImportWorkflowStep(number: 2, title: "Pick budget rules", subtitle: step2Subtitle, state: step2),
+            ImportWorkflowStep(number: 3, title: "Import tiles", subtitle: step3Subtitle, state: step3)
+        ]
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -73,27 +115,28 @@ struct ImportsView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Bank import")
-                    .font(.title2.weight(.semibold))
-                Text("Import CSV or QBO (OFX) bank exports and map transactions to budget tiles.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                if let importedFileName = importSession.importedFileName {
-                    HStack(spacing: 6) {
-                        Text(importedFileName)
-                        if let importedFormat = importSession.importedFormat {
-                            Text("·")
-                            Text(importedFormat.displayName)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Bank import")
+                        .font(.title2.weight(.semibold))
+                    Text("Import CSV or QBO (OFX) bank exports and map transactions to budget tiles.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if let importedFileName = importSession.importedFileName {
+                        HStack(spacing: 6) {
+                            Text(importedFileName)
+                            if let importedFormat = importSession.importedFormat {
+                                Text("·")
+                                Text(importedFormat.displayName)
+                            }
                         }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 }
-            }
 
-            Spacer()
+                Spacer()
 
             if !featureGate.isAvailable(.csvImport) {
                 Label("Pro feature", systemImage: "star.fill")
@@ -122,6 +165,9 @@ struct ImportsView: View {
                 Label("Import \(importSession.previewRows.count) tiles", systemImage: "square.and.arrow.down")
             }
             .disabled(!canImport)
+            }
+
+            ImportWorkflowStepsView(steps: workflowSteps)
         }
         .padding()
     }
@@ -135,11 +181,20 @@ struct ImportsView: View {
                 description: Text(parseError)
             )
         } else if importSession.previewRows.isEmpty && !importSession.hasLoadedFile {
-            ContentUnavailableView(
-                "No file loaded",
-                systemImage: "tray.and.arrow.down",
-                description: Text("Choose a bank CSV or QBO (OFX) export to preview transactions before importing.")
-            )
+            VStack(spacing: 20) {
+                ContentUnavailableView(
+                    "No file loaded",
+                    systemImage: "tray.and.arrow.down",
+                    description: Text("Choose a bank CSV or QBO (OFX) export to preview transactions before importing.")
+                )
+                Button {
+                    showingImporter = true
+                } label: {
+                    Label("Choose file…", systemImage: "doc.badge.plus")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -438,6 +493,94 @@ struct ImportsView: View {
             importSession.importMessage = nil
             importSession.parseError = error.localizedDescription
         }
+    }
+}
+
+private struct ImportWorkflowStep: Identifiable {
+    enum State {
+        case upcoming, current, complete
+    }
+
+    let number: Int
+    let title: String
+    let subtitle: String
+    let state: State
+
+    var id: Int { number }
+}
+
+private struct ImportWorkflowStepsView: View {
+    let steps: [ImportWorkflowStep]
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
+                if index > 0 {
+                    stepConnector(from: steps[index - 1].state, to: step.state)
+                }
+                stepView(step)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func stepView(_ step: ImportWorkflowStep) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            stepBadge(step)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(step.state == .upcoming ? .tertiary : .primary)
+                Text(step.subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(step.state == .upcoming ? 0.55 : 1)
+    }
+
+    @ViewBuilder
+    private func stepBadge(_ step: ImportWorkflowStep) -> some View {
+        Group {
+            switch step.state {
+            case .complete:
+                Image(systemName: "checkmark")
+                    .font(.caption2.weight(.bold))
+            case .current, .upcoming:
+                Text("\(step.number)")
+                    .font(.caption2.weight(.bold))
+            }
+        }
+        .foregroundStyle(step.state == .current ? Color.white : Color.accentColor)
+        .frame(width: 22, height: 22)
+        .background(stepBackground(step.state), in: Circle())
+    }
+
+    private func stepBackground(_ state: ImportWorkflowStep.State) -> Color {
+        switch state {
+        case .complete:
+            Color.accentColor.opacity(0.2)
+        case .current:
+            Color.accentColor
+        case .upcoming:
+            Color.secondary.opacity(0.15)
+        }
+    }
+
+    private func stepConnector(
+        from previous: ImportWorkflowStep.State,
+        to current: ImportWorkflowStep.State
+    ) -> some View {
+        Rectangle()
+            .fill(previous == .complete ? Color.accentColor.opacity(0.35) : Color.secondary.opacity(0.2))
+            .frame(width: 24, height: 2)
+            .padding(.top, 10)
     }
 }
 
