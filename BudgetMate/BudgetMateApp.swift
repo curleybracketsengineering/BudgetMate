@@ -2,16 +2,26 @@
 //  BudgetMateApp.swift
 //  BudgetMate
 //
-//  Created by scott matheson on 08/06/2026.
-//
 
 import SwiftUI
+import SwiftData
 
 @main
 struct BudgetMateApp: App {
+    @State private var featureGate = FeatureGateService()
+    @State private var importSession = ImportSessionStore()
+
+    private let modelContainer = ModelContainerFactory.makeContainer()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AppShellView()
+                .environment(featureGate)
+                .environment(importSession)
         }
+        .modelContainer(modelContainer)
+        #if os(macOS)
+        .defaultSize(width: 1200, height: 800)
+        #endif
     }
 }
