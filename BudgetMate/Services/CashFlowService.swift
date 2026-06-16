@@ -65,7 +65,7 @@ enum CashFlowService {
             count: settings.horizonMonths
         )
 
-        let monthsByKey = Dictionary(uniqueKeysWithValues: months.map { ($0.monthKey, $0) })
+        let monthsByKey = months.keyedByMonthKey()
         let activeTiles = tiles.filter(\.isActive)
         let tilesByKey = Dictionary(grouping: activeTiles) { $0.monthKey }
 

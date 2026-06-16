@@ -98,6 +98,121 @@ enum BudgetRuleService {
         return months.map { symbols[$0 - 1] }.joined(separator: ", ")
     }
 
+    struct PlanningPeriod {
+        let startYear: Int
+        let startMonth: Int
+        let endYear: Int
+        let endMonth: Int
+
+        var label: String {
+            "\(Self.formatYearMonth(startYear, startMonth)) – \(Self.formatYearMonth(endYear, endMonth))"
+        }
+
+        static func from(settings: AppSettings) -> PlanningPeriod? {
+            let sequence = PlanningCalendar.monthSequence(
+                startYear: settings.planningStartYear,
+                startMonth: settings.planningStartMonth,
+                count: settings.horizonMonths
+            )
+            guard let first = sequence.first, let last = sequence.last else { return nil }
+            return PlanningPeriod(
+                startYear: first.year,
+                startMonth: first.month,
+                endYear: last.year,
+                endMonth: last.month
+            )
+        }
+
+        static func formatYearMonth(_ year: Int, _ month: Int) -> String {
+            PlanningCalendar.firstDayOfMonth(year: year, month: month)
+                .formatted(.dateTime.month(.abbreviated).year())
+        }
+    }
+
+    enum PlanningOverlap {
+        case endsBeforePlan(endLabel: String, planLabel: String)
+        case startsAfterPlan(startLabel: String, planLabel: String)
+    }
+
+    static func planningOverlap(for rule: BudgetRule, settings: AppSettings) -> PlanningOverlap? {
+        guard let period = PlanningPeriod.from(settings: settings) else { return nil }
+        let ruleStart = yearMonth(from: rule.startDate)
+
+        if PlanningCalendar.compare(
+            year1: ruleStart.year,
+            month1: ruleStart.month,
+            to: period.endYear,
+            month2: period.endMonth
+        ) == .orderedDescending {
+            return .startsAfterPlan(
+                startLabel: PlanningPeriod.formatYearMonth(ruleStart.year, ruleStart.month),
+                planLabel: period.label
+            )
+        }
+
+        if let endDate = rule.endDate {
+            let ruleEnd = yearMonth(from: endDate)
+            if PlanningCalendar.compare(
+                year1: ruleEnd.year,
+                month1: ruleEnd.month,
+                to: period.startYear,
+                month2: period.startMonth
+            ) == .orderedAscending {
+                return .endsBeforePlan(
+                    endLabel: PlanningPeriod.formatYearMonth(ruleEnd.year, ruleEnd.month),
+                    planLabel: period.label
+                )
+            }
+        }
+
+        return nil
+    }
+
+    static func generateTilesEmptyMessage(for rules: [BudgetRule], settings: AppSettings) -> String {
+        let active = rules.filter { $0.isActive && !$0.isArchived }
+        if active.isEmpty {
+            return "No active rules to generate from. Add a rule with an amount first."
+        }
+
+        guard let period = PlanningPeriod.from(settings: settings) else {
+            return "Your planning horizon has no months. Check Settings."
+        }
+
+        let endedBeforePlan = active.filter {
+            if case .endsBeforePlan = planningOverlap(for: $0, settings: settings) { return true }
+            return false
+        }
+        if !endedBeforePlan.isEmpty {
+            return """
+            \(endedBeforePlan.count) active rule\(endedBeforePlan.count == 1 ? "" : "s") ha\(endedBeforePlan.count == 1 ? "s" : "ve") an end date before your planning period (\(period.label)). Remove or extend the end date, then try again.
+            """
+        }
+
+        let startsAfterPlan = active.filter {
+            if case .startsAfterPlan = planningOverlap(for: $0, settings: settings) { return true }
+            return false
+        }
+        if !startsAfterPlan.isEmpty {
+            return """
+            \(startsAfterPlan.count) active rule\(startsAfterPlan.count == 1 ? "" : "s") start\(startsAfterPlan.count == 1 ? "s" : "") after your planning period (\(period.label)). Tiles are only created from each rule's start date onward — adjust the rule start date or change Settings → Planning start.
+            """
+        }
+
+        if active.allSatisfy({ $0.amountMinorUnits == 0 }) {
+            return "Active rules have no amounts set. Edit rules and add amounts, then try again."
+        }
+
+        return "Tiles for all active rules already exist in your plan."
+    }
+
+    private static func yearMonth(from date: Date) -> (year: Int, month: Int) {
+        let calendar = Calendar.current
+        return (
+            calendar.component(.year, from: date),
+            calendar.component(.month, from: date)
+        )
+    }
+
     static func recurringTiles(for rule: BudgetRule, in tiles: [BudgetTile]) -> [BudgetTile] {
         tiles.filter { $0.linkedRuleId == rule.id && $0.source == .recurring }
     }

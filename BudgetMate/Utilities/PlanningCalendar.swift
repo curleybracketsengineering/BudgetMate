@@ -21,6 +21,14 @@ enum PlanningCalendar {
         return result
     }
 
+    static func firstDayOfMonth(year: Int, month: Int, calendar: Calendar = .current) -> Date {
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = 1
+        return calendar.date(from: components) ?? .now
+    }
+
     static func compare(year1: Int, month1: Int, to year2: Int, month2: Int) -> ComparisonResult {
         if year1 != year2 { return year1 < year2 ? .orderedAscending : .orderedDescending }
         if month1 != month2 { return month1 < month2 ? .orderedAscending : .orderedDescending }

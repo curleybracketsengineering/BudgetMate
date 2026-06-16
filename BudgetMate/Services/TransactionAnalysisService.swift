@@ -51,6 +51,93 @@ enum TransactionAnalysisService {
         return (suggestions, typicalMonth)
     }
 
+    /// Builds a recurring suggestion from user-selected transactions (e.g. missed by auto-grouping).
+    static func makeManualSuggestion(
+        from rows: [ImportPreviewRow],
+        payeeNotes: [String: PayeeNote],
+        amountBasis: AmountBasis,
+        cycle: BudgetCycleType = .monthly
+    ) -> BudgetSuggestion? {
+        guard !rows.isEmpty else { return nil }
+
+        let sorted = rows.sorted { $0.transaction.date < $1.transaction.date }
+        guard sorted.allSatisfy({ $0.budgetType == .income }) else { return nil }
+
+        let dates = sorted.map(\.transaction.date)
+        let amounts = sorted.map(\.transaction.amountMinorUnits)
+        guard let firstDate = dates.first else { return nil }
+
+        let payeeSample = sorted.first!.transaction.payee
+        let representative = sorted[sorted.count / 2]
+        let analysisMonthCount = calendarMonthsSpanned(by: sorted)
+        let perOccurrence = perOccurrenceAmount(amounts: amounts, basis: amountBasis)
+        let totalMinorUnits = amounts.reduce(0, +)
+        let monthlyEquivalent = empiricalMonthlyEquivalent(
+            totalMinorUnits: totalMinorUnits,
+            analysisMonthCount: analysisMonthCount
+        )
+
+        let explanation: String
+        switch cycle {
+        case .monthly:
+            explanation = sorted.count == 1
+                ? "Manually marked as monthly income (only one payment in this import; confirm in Budget Rules)."
+                : "Manually grouped as monthly income — \(sorted.count) payments."
+        default:
+            explanation = "Manually grouped recurring income — \(sorted.count) payment(s)."
+        }
+
+        var suggestion = BudgetSuggestion(
+            name: PayeeNormalization.displayName(from: payeeSample),
+            budgetType: .income,
+            category: representative.category,
+            cycle: cycle,
+            amountMinorUnits: perOccurrence,
+            monthlyEquivalentMinorUnits: monthlyEquivalent,
+            startDate: firstDate,
+            lastPaymentDate: dates.last ?? firstDate,
+            confidence: .estimated,
+            explanation: explanation,
+            paymentMethod: PaymentMethodLabel.mostCommon(in: sorted),
+            amountMinMinorUnits: amounts.min() ?? perOccurrence,
+            amountMaxMinorUnits: amounts.max() ?? perOccurrence,
+            transactionCount: sorted.count,
+            linkedTransactionIDs: Set(sorted.map(\.transaction.id)),
+            isManual: true,
+            payeeMatchKey: PayeeNormalization.matchKey(payeeSample),
+            bankPayeeSample: payeeSample
+        )
+        PayeeNoteService.apply(to: &suggestion, payeeSample: payeeSample, notes: payeeNotes)
+        return suggestion
+    }
+
+    static func typicalMonth(
+        suggestions: [BudgetSuggestion],
+        previewRows: [ImportPreviewRow]
+    ) -> TypicalMonthSummary {
+        let eligible = previewRows.filter { $0.budgetType != .transfer }
+        let linkedIDs = Set(suggestions.flatMap(\.linkedTransactionIDs))
+        let remaining = eligible.filter { !linkedIDs.contains($0.transaction.id) }
+        let monthCount = calendarMonthsSpanned(by: eligible)
+        return buildTypicalMonth(
+            suggestions: suggestions.filter { !$0.isIgnored },
+            remainingRows: remaining,
+            monthCount: monthCount
+        )
+    }
+
+    static func inferredCycle(for row: ImportPreviewRow) -> (BudgetCycleType, [Int], String) {
+        let payee = row.transaction.payee.uppercased()
+        let isKnownIncome = row.budgetType == .income
+            && TransactionCategorizationService.isKnownRegularIncomePayee(row.transaction.payee)
+        return detectCycle(
+            dates: [row.transaction.date],
+            payee: payee,
+            budgetType: row.budgetType,
+            isKnownRegularIncome: isKnownIncome
+        )
+    }
+
     // MARK: - Detection
 
     private static func minimumOccurrences(for cluster: [ImportPreviewRow]) -> Int {

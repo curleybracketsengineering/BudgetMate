@@ -24,69 +24,35 @@ struct BudgetRuleFormView: View {
     @State private var selectedMonths: Set<Int> = []
     @State private var linkedAccountId: UUID?
     @State private var transferToAccountId: UUID?
-    @State private var loadedAmountMinorUnits = 0
-    @State private var loadedCycle: BudgetCycleType = .monthly
-    @State private var loadedMonthPatternRaw = ""
+    @State private var showIndividuallyInPlan = false
+    @State private var loadedSnapshot = BudgetRuleEditor.LoadedSnapshot(
+        amountMinorUnits: 0,
+        cycle: .monthly,
+        monthPatternRaw: "",
+        startDate: .now
+    )
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Rule") {
-                    TextField("Name", text: $name)
-                    TextField("Amount", text: $amountText)
-                    Picker("Type", selection: $type) {
-                        ForEach(BudgetType.allCases) { t in
-                            Text(t.displayName).tag(t)
-                        }
-                    }
-                    TextField("Category", text: $category)
-                    if type == .transfer {
-                        TransferAccountFields(
-                            fromAccountId: $linkedAccountId,
-                            toAccountId: $transferToAccountId
-                        )
-                    } else {
-                        AccountPicker(linkedAccountId: $linkedAccountId)
-                    }
-                    Picker("Cycle", selection: $cycle) {
-                        ForEach(BudgetCycleType.allCases) { c in
-                            Text(c.displayName).tag(c)
-                        }
-                    }
-                }
-
-                if cycle == .tenMonthly {
-                    Section("Active months") {
-                        Text("Select the months this payment occurs (typically 10 per year).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        MonthPatternPicker(selectedMonths: $selectedMonths)
-                    }
-                }
-
-                Section("Dates") {
-                    DatePicker("Start date", selection: $startDate, displayedComponents: .date)
-                    Toggle("Has end date", isOn: $hasEndDate)
-                    if hasEndDate {
-                        DatePicker("End date", selection: $endDate, displayedComponents: .date)
-                    }
-                }
-
-                Section("Metadata") {
-                    Toggle("Archived", isOn: $isArchived)
-                    Picker("Confidence", selection: $confidence) {
-                        ForEach(ConfidenceLevel.allCases) { c in
-                            Text(c.displayName).tag(c)
-                        }
-                    }
-                    Picker("Commitment", selection: $commitment) {
-                        ForEach(CommitmentType.allCases) { c in
-                            Text(c.displayName).tag(c)
-                        }
-                    }
-                    TextField("Assumptions / notes", text: $assumptionsNotes, axis: .vertical)
-                        .lineLimit(3...6)
-                }
+                BudgetRuleEditorFields(
+                    name: $name,
+                    amountText: $amountText,
+                    type: $type,
+                    category: $category,
+                    cycle: $cycle,
+                    startDate: $startDate,
+                    hasEndDate: $hasEndDate,
+                    endDate: $endDate,
+                    isArchived: $isArchived,
+                    confidence: $confidence,
+                    commitment: $commitment,
+                    assumptionsNotes: $assumptionsNotes,
+                    selectedMonths: $selectedMonths,
+                    linkedAccountId: $linkedAccountId,
+                    transferToAccountId: $transferToAccountId,
+                    showIndividuallyInPlan: $showIndividuallyInPlan
+                )
             }
             .formStyle(.grouped)
             .navigationTitle(existingRule == nil ? "New Rule" : "Edit Rule")
@@ -110,24 +76,24 @@ struct BudgetRuleFormView: View {
 
     private func loadExisting() {
         if let rule = existingRule {
-            name = rule.name
-            amountText = MoneyFormatter.majorUnitsString(minorUnits: rule.amountMinorUnits, currency: currency)
-            type = rule.type
-            category = rule.category
-            cycle = rule.cycle
-            startDate = rule.startDate
-            hasEndDate = rule.endDate != nil
-            endDate = rule.endDate ?? .now
-            isArchived = rule.isArchived
-            confidence = rule.confidence
-            commitment = rule.commitment
-            assumptionsNotes = rule.assumptionsNotes
-            selectedMonths = BudgetRuleService.parseMonthPattern(rule.monthPatternRaw)
-            linkedAccountId = rule.linkedAccountId
-            transferToAccountId = rule.transferToAccountId
-            loadedAmountMinorUnits = rule.amountMinorUnits
-            loadedCycle = rule.cycle
-            loadedMonthPatternRaw = rule.monthPatternRaw
+            let loaded = BudgetRuleEditor.load(from: rule, currency: currency)
+            name = loaded.name
+            amountText = loaded.amountText
+            type = loaded.type
+            category = loaded.category
+            cycle = loaded.cycle
+            startDate = loaded.startDate
+            hasEndDate = loaded.hasEndDate
+            endDate = loaded.endDate
+            isArchived = loaded.isArchived
+            confidence = loaded.confidence
+            commitment = loaded.commitment
+            assumptionsNotes = loaded.assumptionsNotes
+            selectedMonths = loaded.selectedMonths
+            linkedAccountId = loaded.linkedAccountId
+            transferToAccountId = loaded.transferToAccountId
+            showIndividuallyInPlan = loaded.showIndividuallyInPlan
+            loadedSnapshot = loaded.snapshot
             return
         }
 
@@ -142,7 +108,6 @@ struct BudgetRuleFormView: View {
     }
 
     private func save() {
-        let amount = MoneyFormatter.parseMajorUnits(amountText, currency: currency) ?? 0
         let rule: BudgetRule
         if let existingRule {
             rule = existingRule
@@ -152,76 +117,34 @@ struct BudgetRuleFormView: View {
             modelContext.insert(rule)
         }
 
-        rule.name = name
-        rule.amountMinorUnits = amount
-        rule.type = type
-        rule.category = category
-        rule.cycle = cycle
-        rule.startDate = startDate
-        rule.endDate = hasEndDate ? endDate : nil
-        rule.isArchived = isArchived
-        rule.isActive = !isArchived
-        rule.confidence = confidence
-        rule.commitment = commitment
-        rule.assumptionsNotes = assumptionsNotes
-        rule.linkedAccountId = linkedAccountId
-        rule.transferToAccountId = type == .transfer ? transferToAccountId : nil
-        let monthPatternRaw = cycle == .tenMonthly
-            ? BudgetRuleService.formatMonthPattern(selectedMonths)
-            : ""
-        rule.monthPatternRaw = monthPatternRaw
-
-        let amountChanged = existingRule != nil && amount != loadedAmountMinorUnits
-        let scheduleChanged = existingRule != nil && (cycle != loadedCycle || monthPatternRaw != loadedMonthPatternRaw)
-        if existingRule == nil || amountChanged || scheduleChanged {
-            rule.monthlyEquivalentMinorUnits = BudgetRuleService.calculatedMonthlyEquivalent(for: rule)
-        }
-
-        rule.markUpdated()
+        BudgetRuleEditor.apply(
+            to: rule,
+            currency: currency,
+            name: name,
+            amountText: amountText,
+            type: type,
+            category: category,
+            cycle: cycle,
+            startDate: startDate,
+            hasEndDate: hasEndDate,
+            endDate: endDate,
+            isArchived: isArchived,
+            confidence: confidence,
+            commitment: commitment,
+            assumptionsNotes: assumptionsNotes,
+            selectedMonths: selectedMonths,
+            linkedAccountId: linkedAccountId,
+            transferToAccountId: transferToAccountId,
+            showIndividuallyInPlan: showIndividuallyInPlan,
+            snapshot: &loadedSnapshot
+        )
 
         do {
             try modelContext.save()
+            _ = try AppDataService.generateAndRefresh(in: modelContext)
             dismiss()
         } catch {
             print("Rule save failed: \(error)")
-        }
-    }
-}
-
-private struct MonthPatternPicker: View {
-    @Binding var selectedMonths: Set<Int>
-
-    private let monthSymbols = Calendar.current.shortMonthSymbols
-
-    var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 72))], spacing: 8) {
-            ForEach(1...12, id: \.self) { month in
-                let isSelected = selectedMonths.contains(month)
-                Button {
-                    if isSelected {
-                        selectedMonths.remove(month)
-                    } else {
-                        selectedMonths.insert(month)
-                    }
-                } label: {
-                    Text(monthSymbols[month - 1])
-                        .font(.caption.weight(.medium))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.3))
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-
-        if !selectedMonths.isEmpty {
-            Text("\(selectedMonths.count) month\(selectedMonths.count == 1 ? "" : "s") selected")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 }

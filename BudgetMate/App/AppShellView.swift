@@ -7,10 +7,12 @@ struct AppShellView: View {
 
     @State private var selection: NavigationSection? = .monthlyPlan
     @State private var selectedMonth: BudgetMonth?
+    @State private var selectedBudgetRule: BudgetRule?
     @State private var showingFirstRun = false
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(selection: $selection) {
                 ForEach(NavigationSection.allCases) { section in
                     Label(section.title, systemImage: section.systemImage)
@@ -25,6 +27,14 @@ struct AppShellView: View {
             detailColumn
         }
         .onAppear { checkFirstRun() }
+        .onChange(of: selection) {
+            if selection != .monthlyPlan {
+                selectedMonth = nil
+            }
+            if selection != .budgetRules {
+                selectedBudgetRule = nil
+            }
+        }
         .sheet(isPresented: $showingFirstRun) {
             FirstRunSetupView()
         }
@@ -38,7 +48,7 @@ struct AppShellView: View {
         case .monthlyPlan:
             MonthlyPlanView(selectedMonth: $selectedMonth)
         case .budgetRules:
-            BudgetRulesListView()
+            BudgetRulesListView(selectedRule: $selectedBudgetRule)
         case .holidays:
             HolidaysView()
         case .imports:
@@ -52,14 +62,31 @@ struct AppShellView: View {
 
     @ViewBuilder
     private var detailColumn: some View {
-        if selection == .monthlyPlan, let selectedMonth {
-            MonthDetailView(month: selectedMonth)
-        } else {
-            ContentUnavailableView(
-                selection == .monthlyPlan ? "Select a month" : "No detail",
-                systemImage: "calendar",
-                description: Text(selection == .monthlyPlan ? "Click a month card to view details." : "This section has no detail pane.")
-            )
+        switch selection {
+        case .monthlyPlan:
+            if let selectedMonth {
+                MonthDetailView(month: selectedMonth)
+            } else {
+                ContentUnavailableView(
+                    "Select a month",
+                    systemImage: "calendar",
+                    description: Text("Click a month card to view details.")
+                )
+            }
+        case .budgetRules:
+            if let selectedBudgetRule {
+                BudgetRuleDetailView(rule: selectedBudgetRule) {
+                    self.selectedBudgetRule = nil
+                }
+            } else {
+                ContentUnavailableView(
+                    "Select a rule",
+                    systemImage: "arrow.triangle.2.circlepath",
+                    description: Text("Choose a rule to see its monthly impact and details.")
+                )
+            }
+        default:
+            EmptyView()
         }
     }
 

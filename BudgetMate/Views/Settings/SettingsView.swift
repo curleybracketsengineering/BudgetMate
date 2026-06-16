@@ -9,7 +9,7 @@ struct SettingsView: View {
 
     @State private var planningStartMonth = 1
     @State private var planningStartYear = 2026
-    @State private var horizonMonths = 12
+    @State private var horizonMonths = PlanningHorizon.baseMonths
     @State private var startingBalanceText = ""
     @State private var safeThresholdText = ""
     @State private var warningThresholdText = ""
@@ -19,6 +19,8 @@ struct SettingsView: View {
     @State private var didLoad = false
     @State private var showingNewAccount = false
     @State private var editingAccount: BankAccount?
+    @State private var showingClearDataConfirmation = false
+    @State private var showingStartAgain = false
     @FocusState private var focusedMoneyField: MoneyField?
 
     private var settings: AppSettings? { settingsList.first }
@@ -40,6 +42,7 @@ struct SettingsView: View {
                 currencySection
                 proSection
                 iCloudSection(settings)
+                startAgainSection
             } else {
                 Text("No settings found. Restart the app to run setup.")
             }
@@ -61,6 +64,20 @@ struct SettingsView: View {
         }
         .sheet(item: $editingAccount, onDismiss: reloadStartingBalanceFromStore) { account in
             BankAccountFormView(currency: currency, existingAccount: account)
+        }
+        .sheet(isPresented: $showingStartAgain, onDismiss: reloadAfterStartAgain) {
+            FirstRunSetupView()
+        }
+        .confirmationDialog(
+            "Clear all data?",
+            isPresented: $showingClearDataConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear and start again", role: .destructive) {
+                clearAllDataAndStartAgain()
+            }
+        } message: {
+            Text("This permanently deletes all budget data on this device — accounts, rules, months, and imports. If iCloud sync is on, the reset will sync to your other devices.")
         }
     }
 
@@ -118,12 +135,16 @@ struct SettingsView: View {
         Section("Planning") {
             PlanningStartPicker(month: $planningStartMonth, year: $planningStartYear)
 
-            Picker("Horizon", selection: $horizonMonths) {
-                ForEach(featureGate.allowedHorizons(), id: \.self) { h in
-                    Text("\(h) months").tag(h)
+            Picker("Plan length", selection: $horizonMonths) {
+                ForEach(featureGate.allowedHorizons(), id: \.self) { months in
+                    Text(PlanningHorizon.label(forMonths: months)).tag(months)
                 }
             }
-            .disabled(!featureGate.isProUnlocked && horizonMonths == 12)
+            .disabled(featureGate.allowedHorizons().count == 1)
+
+            Text("Your plan includes \(PlanningHorizon.baseYears) years by default. Pro unlocks extra years up to 10.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             LabeledContent("Starting balance") {
                 CurrencyAmountField(currency: currency, text: $startingBalanceText) {
@@ -161,6 +182,17 @@ struct SettingsView: View {
         Section("Pro unlock (dev)") {
             Toggle("Pro unlocked", isOn: Bindable(featureGate).isProUnlocked)
             Text("StoreKit integration comes later. Toggle for testing Pro features.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var startAgainSection: some View {
+        Section("Start again") {
+            Button("Clear all data and start again", role: .destructive) {
+                showingClearDataConfirmation = true
+            }
+            Text("Removes everything and walks you through setup from scratch.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -210,12 +242,27 @@ struct SettingsView: View {
         )
     }
 
+    private func reloadAfterStartAgain() {
+        didLoad = false
+        loadFromSettings()
+    }
+
+    private func clearAllDataAndStartAgain() {
+        do {
+            try AppDataService.clearAllData(in: modelContext)
+            didLoad = false
+            showingStartAgain = true
+        } catch {
+            print("Clear all data failed: \(error)")
+        }
+    }
+
     private func loadFromSettings() {
         guard let settings, !didLoad else { return }
         didLoad = true
         planningStartMonth = settings.planningStartMonth
         planningStartYear = settings.planningStartYear
-        horizonMonths = min(settings.horizonMonths, featureGate.maxHorizonMonths())
+        horizonMonths = featureGate.normalizedHorizon(settings.horizonMonths)
         currency = settings.currency
         startingBalanceText = MoneyFormatter.majorUnitsString(minorUnits: settings.startingBalanceMinorUnits, currency: currency)
         safeThresholdText = MoneyFormatter.majorUnitsString(minorUnits: settings.safeThresholdMinorUnits, currency: currency)
@@ -228,7 +275,7 @@ struct SettingsView: View {
         guard let settings else { return }
         settings.planningStartMonth = planningStartMonth
         settings.planningStartYear = planningStartYear
-        settings.horizonMonths = min(horizonMonths, featureGate.maxHorizonMonths())
+        settings.horizonMonths = featureGate.normalizedHorizon(horizonMonths)
         settings.currency = currency
         settings.startingBalanceMinorUnits = MoneyFormatter.parseMajorUnits(startingBalanceText, currency: currency) ?? settings.startingBalanceMinorUnits
         if let primary = BankAccountService.primaryAccount(from: accounts) {

@@ -9,23 +9,28 @@ struct BudgetRulesListView: View {
     @Query private var tiles: [BudgetTile]
     @Query(sort: \BankAccount.displayOrder) private var accounts: [BankAccount]
 
+    @Binding var selectedRule: BudgetRule?
     @State private var searchText = ""
-    @State private var selectedRule: BudgetRule?
     @State private var showingNewRule = false
-    @State private var editingRule: BudgetRule?
     @State private var newRuleTemplate: BudgetRuleStarterTemplate?
     @State private var showArchived = false
     @State private var rulePendingDeletion: BudgetRule?
     @State private var filterAccountId: UUID?
+    @State private var generateAlert: GenerateTilesAlert?
 
     private var currency: AppCurrency { settingsList.first?.currency ?? .GBP }
 
     private var filteredRules: [BudgetRule] {
         rules.filter { rule in
-            rule.isArchived == showArchived &&
+            matchesArchiveFilter(rule) &&
             (searchText.isEmpty || rule.name.localizedCaseInsensitiveContains(searchText)) &&
             matchesAccountFilter(rule)
         }
+    }
+
+    /// Default (`showArchived == false`): live rules only. Archived mode: archived rules only.
+    private func matchesArchiveFilter(_ rule: BudgetRule) -> Bool {
+        showArchived ? rule.isArchived : !rule.isArchived
     }
 
     private func matchesAccountFilter(_ rule: BudgetRule) -> Bool {
@@ -84,8 +89,10 @@ struct BudgetRulesListView: View {
         .sheet(isPresented: $showingNewRule, onDismiss: { newRuleTemplate = nil }) {
             BudgetRuleFormView(currency: currency, template: newRuleTemplate)
         }
-        .sheet(item: $editingRule) { rule in
-            BudgetRuleFormView(currency: currency, existingRule: rule)
+        .onChange(of: showArchived) {
+            if let selectedRule, !matchesArchiveFilter(selectedRule) {
+                self.selectedRule = nil
+            }
         }
         .confirmationDialog(
             "Delete this rule permanently?",
@@ -103,6 +110,13 @@ struct BudgetRulesListView: View {
             }
         } message: { rule in
             Text(deleteConfirmationMessage(for: rule))
+        }
+        .alert(item: $generateAlert) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                dismissButton: .default(Text("OK"))
+            )
         }
     }
 
@@ -128,6 +142,10 @@ struct BudgetRulesListView: View {
                 AccountFilterPicker(filterAccountId: $filterAccountId)
                     .frame(maxWidth: 240)
             }
+
+            Toggle("Show archived", isOn: $showArchived)
+                .toggleStyle(.switch)
+                .font(.subheadline)
         }
         .padding()
     }
@@ -179,52 +197,12 @@ struct BudgetRulesListView: View {
         if !hasAnyRules {
             BudgetRulesEmptyState(onNewRule: { showingNewRule = true }, onTemplate: startFromTemplate)
         } else {
-            HSplitView {
-                rulesList
-                    .frame(minWidth: 320)
-
-                if let selectedRule {
-                    RulePreviewPanel(
-                        rule: selectedRule,
-                        currency: currency,
-                        accountName: selectedRule.type == .transfer
-                            ? nil
-                            : BankAccountService.accountName(
-                                for: selectedRule.linkedAccountId,
-                                accounts: accounts
-                            ),
-                        transferDescription: BankAccountService.transferDescription(
-                            from: selectedRule.linkedAccountId,
-                            to: selectedRule.transferToAccountId,
-                            accounts: accounts
-                        ),
-                        linkedTileCount: linkedTileCount(for: selectedRule),
-                        showExpiryWarning: BudgetRuleService.isExpiringSoon(selectedRule)
-                            && featureGate.isAvailable(.ruleExpiryWarnings),
-                        onRestore: selectedRule.isArchived ? { restore(selectedRule) } : nil,
-                        onDeletePermanently: selectedRule.isArchived
-                            ? { rulePendingDeletion = selectedRule }
-                            : nil
-                    )
-                    .frame(minWidth: 280)
-                    .padding()
-                } else {
-                    ContentUnavailableView(
-                        "Select a rule",
-                        systemImage: "arrow.left",
-                        description: Text("Choose a rule to see its monthly impact and details.")
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
+            rulesList
         }
     }
 
     private var rulesList: some View {
         List(selection: $selectedRule) {
-            Toggle("Show archived", isOn: $showArchived)
-                .font(.caption)
-
             if !incomingRules.isEmpty {
                 Section("Incoming") {
                     ForEach(incomingRules, id: \.id) { rule in
@@ -285,7 +263,6 @@ struct BudgetRulesListView: View {
         }
         .tag(rule)
         .contextMenu {
-            Button("Edit") { editingRule = rule }
             if rule.isArchived {
                 Button("Restore") { restore(rule) }
                 Divider()
@@ -304,6 +281,9 @@ struct BudgetRulesListView: View {
             currency: currency
         )
         var parts = ["\(rule.cycle.displayName)", "\(monthly) / month"]
+        if !rule.showIndividuallyInPlan, rule.type == .income || rule.type == .expense || rule.type == .saving {
+            parts.append("Grouped in plan")
+        }
         if accounts.count > 1 {
             if rule.type == .transfer,
                let transfer = BankAccountService.transferDescription(
@@ -317,10 +297,6 @@ struct BudgetRulesListView: View {
             }
         }
         return parts.joined(separator: " · ")
-    }
-
-    private func linkedTileCount(for rule: BudgetRule) -> Int {
-        tiles.filter { $0.linkedRuleId == rule.id && $0.isActive }.count
     }
 
     @ToolbarContentBuilder
@@ -340,7 +316,6 @@ struct BudgetRulesListView: View {
             .help("Create forecast tiles from active rules across your planning horizon.")
 
             if let selectedRule {
-                Button("Edit") { editingRule = selectedRule }
                 if selectedRule.isArchived {
                     Button("Restore") { restore(selectedRule) }
                     Button("Delete Permanently", role: .destructive) {
@@ -400,11 +375,38 @@ struct BudgetRulesListView: View {
 
     private func generateTiles() {
         do {
-            try AppDataService.generateAndRefresh(in: modelContext)
+            let created = try AppDataService.generateAndRefresh(in: modelContext)
+            if created == 0 {
+                generateAlert = GenerateTilesAlert(
+                    title: "No new tiles",
+                    message: generateTilesEmptyMessage
+                )
+            } else {
+                generateAlert = GenerateTilesAlert(
+                    title: "Tiles generated",
+                    message: "Added \(created) tile\(created == 1 ? "" : "s") to your monthly plan."
+                )
+            }
         } catch {
-            print("Generate tiles failed: \(error)")
+            generateAlert = GenerateTilesAlert(
+                title: "Generate failed",
+                message: error.localizedDescription
+            )
         }
     }
+
+    private var generateTilesEmptyMessage: String {
+        guard let settings = settingsList.first else {
+            return "Could not read plan settings."
+        }
+        return BudgetRuleService.generateTilesEmptyMessage(for: rules, settings: settings)
+    }
+}
+
+private struct GenerateTilesAlert: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
 
 private struct BudgetRulesEmptyState: View {

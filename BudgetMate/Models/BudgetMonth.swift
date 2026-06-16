@@ -33,4 +33,18 @@ final class BudgetMonth {
         }
         return formatter.string(from: date)
     }
+
+    /// When multiple records share a monthKey, keep the locked one, or the most recently updated.
+    static func preferDuplicate(_ existing: BudgetMonth, _ duplicate: BudgetMonth) -> BudgetMonth {
+        if existing.isLocked != duplicate.isLocked {
+            return existing.isLocked ? existing : duplicate
+        }
+        return existing.updatedAt >= duplicate.updatedAt ? existing : duplicate
+    }
+}
+
+extension Array where Element == BudgetMonth {
+    func keyedByMonthKey() -> [String: BudgetMonth] {
+        Dictionary(map { ($0.monthKey, $0) }, uniquingKeysWith: BudgetMonth.preferDuplicate)
+    }
 }

@@ -11,10 +11,12 @@ struct ImportsView: View {
 
     @State private var showingImporter = false
     @State private var typeFilter: BudgetType?
+    @State private var transactionSearchText = ""
     @State private var showingExcluded = false
     @State private var editingPayeeNote: PayeeNoteEditContext?
     @State private var pendingUndo: PendingUndo?
     @State private var undoDismissTask: Task<Void, Never>?
+    @State private var selectedTransactionIDs: Set<UUID> = []
 
     private var settings: AppSettings? { settingsList.first }
     private var currency: AppCurrency { settings?.currency ?? .GBP }
@@ -23,6 +25,15 @@ struct ImportsView: View {
     }
 
     private var filteredRows: [ImportPreviewRow] {
+        var rows = transactionRowsBeforeSearch
+        let query = transactionSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.isEmpty {
+            rows = rows.filter { rowMatchesPayeeSearch($0, query: query) }
+        }
+        return rows
+    }
+
+    private var transactionRowsBeforeSearch: [ImportPreviewRow] {
         var rows = importSession.previewRows.filter {
             importSession.flowFocus.includes(budgetType: $0.budgetType)
         }
@@ -30,6 +41,18 @@ struct ImportsView: View {
             rows = rows.filter { $0.budgetType == typeFilter }
         }
         return rows
+    }
+
+    private var isTransactionSearchActive: Bool {
+        !transactionSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var linkedIncomingTransactionIDs: Set<UUID> {
+        importSession.linkedTransactionIDs(for: .incoming)
+    }
+
+    private var showsIncomingSelection: Bool {
+        importSession.flowFocus == .incoming
     }
 
     private var incomingTransactionCount: Int {
@@ -80,13 +103,13 @@ struct ImportsView: View {
         }()
         let step3Subtitle: String = {
             if step3 == .complete { return "Tiles added to monthly plan" }
-            if canImport { return "Press Import \(importSession.previewRows.count) tiles" }
-            return "Add to monthly plan"
+            if canImport { return "Import one-offs below or press Import \(importSession.previewRows.count) tiles" }
+            return "Add one-off tiles to monthly plan"
         }()
         return [
-            ImportWorkflowStep(number: 1, title: "Import document", subtitle: "Choose bank export", state: step1),
-            ImportWorkflowStep(number: 2, title: "Pick budget rules", subtitle: step2Subtitle, state: step2),
-            ImportWorkflowStep(number: 3, title: "Import tiles", subtitle: step3Subtitle, state: step3)
+            ImportWorkflowStep(number: 1, icon: "doc.badge.plus", title: "Import document", subtitle: "Choose bank export", state: step1),
+            ImportWorkflowStep(number: 2, icon: "list.bullet.rectangle.fill", title: "Pick budget rules", subtitle: step2Subtitle, state: step2),
+            ImportWorkflowStep(number: 3, icon: "square.grid.2x2.fill", title: "Import tiles", subtitle: step3Subtitle, state: step3)
         ]
     }
 
@@ -148,6 +171,8 @@ struct ImportsView: View {
                 Button {
                     importSession.clear()
                     typeFilter = nil
+                    transactionSearchText = ""
+                    selectedTransactionIDs = []
                 } label: {
                     Label("Clear", systemImage: "xmark.circle")
                 }
@@ -168,6 +193,7 @@ struct ImportsView: View {
             }
 
             ImportWorkflowStepsView(steps: workflowSteps)
+                .frame(maxWidth: .infinity)
         }
         .padding()
     }
@@ -255,6 +281,8 @@ struct ImportsView: View {
             .labelsHidden()
             .onChange(of: importSession.flowFocus) {
                 typeFilter = nil
+                transactionSearchText = ""
+                selectedTransactionIDs = []
             }
 
             Text(flowFocusHelpText)
@@ -309,9 +337,15 @@ struct ImportsView: View {
                 Text(previewSectionTitle)
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Text("\(filteredRows.count) shown")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if isTransactionSearchActive {
+                    Text("\(filteredRows.count) shown · \(transactionRowsBeforeSearch.count) total")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("\(filteredRows.count) shown")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if !importSession.excludedRows.isEmpty {
                     Text("· \(importSession.excludedRows.count) excluded")
                         .font(.caption)
@@ -319,18 +353,49 @@ struct ImportsView: View {
                 }
             }
 
-            Text("Remove one-off or unusual transactions you don't want as budget tiles.")
+            Text(incomingTransactionsHelpText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            if showsIncomingSelection && !selectedTransactionIDs.isEmpty {
+                incomingSelectionBar
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search payee…", text: $transactionSearchText)
+                    .textFieldStyle(.roundedBorder)
+                if !transactionSearchText.isEmpty {
+                    Button {
+                        transactionSearchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear search")
+                }
+            }
+            .frame(maxWidth: 320, alignment: .leading)
+
             LazyVStack(spacing: 0) {
-                ImportRowHeader()
+                ImportRowHeader(showsSelection: showsIncomingSelection)
                 Divider()
                 ForEach(filteredRows) { row in
+                    let isLinked = showsIncomingSelection && linkedIncomingTransactionIDs.contains(row.id)
+                    let isSelectable = showsIncomingSelection && row.budgetType == .income && !isLinked
                     ImportTransactionRowView(
                         row: binding(for: row),
                         currency: currency,
                         payeeNoteIndex: payeeNoteIndex,
+                        isSelectable: isSelectable,
+                        isSelected: selectedTransactionIDs.contains(row.id),
+                        onToggleSelection: {
+                            toggleTransactionSelection(row.id)
+                        },
+                        onImport: { importRowWithUndo(row) },
+                        onCreateRecurringRule: { createRecurringRuleWithUndo(row) },
                         onRemove: { excludeRowWithUndo(row) },
                         onEditPayeeNote: {
                             editingPayeeNote = PayeeNoteEditContext(
@@ -352,6 +417,66 @@ struct ImportsView: View {
         switch importSession.flowFocus {
         case .incoming: "Incoming transactions"
         case .outgoing: "Outgoing transactions"
+        }
+    }
+
+    private var incomingTransactionsHelpText: String {
+        if showsIncomingSelection {
+            return "Select income items with the round buttons to group missed recurring payments as monthly income above. You can also import one-off tiles, create a single recurring rule, or exclude items."
+        }
+        return "Import individual transactions as one-off tiles in their actual month, create a recurring budget rule, or exclude items you don't want. Recurring groups above become budget rules (summary), not one-off tiles."
+    }
+
+    private var incomingSelectionBar: some View {
+        HStack(spacing: 12) {
+            Text("\(selectedTransactionIDs.count) selected")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            Button {
+                groupSelectedAsMonthlyIncome()
+            } label: {
+                Label("Group as monthly income", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+
+            Button("Clear selection") {
+                selectedTransactionIDs = []
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func toggleTransactionSelection(_ id: UUID) {
+        if selectedTransactionIDs.contains(id) {
+            selectedTransactionIDs.remove(id)
+        } else {
+            selectedTransactionIDs.insert(id)
+        }
+    }
+
+    private func groupSelectedAsMonthlyIncome() {
+        let rows = importSession.previewRows.filter { selectedTransactionIDs.contains($0.id) }
+        guard !rows.isEmpty else {
+            selectedTransactionIDs = []
+            return
+        }
+
+        guard let suggestion = importSession.addManualSuggestion(from: rows, cycle: .monthly) else {
+            importSession.parseError = "Could not group selected transactions as monthly income."
+            return
+        }
+
+        selectedTransactionIDs = []
+        importSession.importMessage = "Added \"\(suggestion.name)\" to recurring income above."
+        let suggestionID = suggestion.id
+        presentUndo(message: "Grouped \(suggestion.name) as monthly income") {
+            importSession.removeSuggestion(id: suggestionID)
         }
     }
 
@@ -394,6 +519,12 @@ struct ImportsView: View {
         importSession.refreshAnalysis()
     }
 
+    private func rowMatchesPayeeSearch(_ row: ImportPreviewRow, query: String) -> Bool {
+        let labels = PayeeNoteService.resolvedPayeeLabels(for: row.transaction.payee, in: payeeNoteIndex)
+        let fields = [row.transaction.payee, labels.title, labels.subtitle].compactMap { $0 }
+        return fields.contains { $0.localizedCaseInsensitiveContains(query) }
+    }
+
     private func presentUndo(message: String, restore: @escaping () -> Void) {
         undoDismissTask?.cancel()
         pendingUndo = PendingUndo(message: message, restore: restore)
@@ -413,6 +544,7 @@ struct ImportsView: View {
     }
 
     private func excludeRowWithUndo(_ row: ImportPreviewRow) {
+        selectedTransactionIDs.remove(row.id)
         importSession.excludeRow(row)
         let payee = PayeeNoteService.resolvedPayeeLabels(
             for: row.transaction.payee,
@@ -420,6 +552,59 @@ struct ImportsView: View {
         ).title
         presentUndo(message: "Excluded \(payee)") {
             importSession.restoreRow(row)
+        }
+    }
+
+    private func importRowWithUndo(_ row: ImportPreviewRow) {
+        guard featureGate.isAvailable(.csvImport) else { return }
+
+        do {
+            let result = try BankImportService.importTiles(rows: [row], in: modelContext)
+            importSession.removeImportedRow(row)
+            let payee = PayeeNoteService.resolvedPayeeLabels(
+                for: row.transaction.payee,
+                in: payeeNoteIndex
+            ).title
+            let monthKey = result.monthsAffected.sorted().first ?? row.transaction.date.formatted(.dateTime.month(.abbreviated).year())
+            importSession.importMessage = "Imported one-off tile for \(payee) in \(monthKey)."
+            let importedTileIDs = result.tileIDs
+            presentUndo(message: "Imported \(payee)") {
+                do {
+                    try BankImportService.deleteTiles(ids: importedTileIDs, in: modelContext)
+                    importSession.restoreImportedRow(row)
+                } catch {
+                    importSession.parseError = error.localizedDescription
+                }
+            }
+        } catch {
+            importSession.parseError = error.localizedDescription
+        }
+    }
+
+    private func createRecurringRuleWithUndo(_ row: ImportPreviewRow) {
+        guard featureGate.isAvailable(.csvImport) else { return }
+
+        do {
+            let result = try BudgetSuggestionService.createRule(
+                from: row,
+                payeeNotes: payeeNoteIndex,
+                in: modelContext
+            )
+            importSession.excludeRow(row)
+            importSession.importMessage = "Created recurring budget rule \"\(result.name)\" in Budget Rules and generated forecast tiles."
+            let ruleID = result.ruleID
+            presentUndo(message: "Created recurring rule for \(result.name)") {
+                do {
+                    try BudgetSuggestionService.deleteRule(id: ruleID, in: modelContext)
+                    importSession.restoreRow(row)
+                    importSession.refreshAnalysis()
+                } catch {
+                    importSession.parseError = error.localizedDescription
+                }
+            }
+            importSession.refreshAnalysis()
+        } catch {
+            importSession.parseError = error.localizedDescription
         }
     }
 
@@ -474,7 +659,9 @@ struct ImportsView: View {
             )
             syncPayeeNotes()
             typeFilter = nil
+            transactionSearchText = ""
             showingExcluded = false
+            selectedTransactionIDs = []
         } catch {
             importSession.loadFailed(error.localizedDescription)
         }
@@ -486,7 +673,7 @@ struct ImportsView: View {
         do {
             let result = try BankImportService.importTiles(rows: importSession.previewRows, in: modelContext)
             let monthList = result.monthsAffected.sorted().joined(separator: ", ")
-            importSession.importMessage = "Imported \(result.tilesCreated) tiles across \(result.monthsAffected.count) month(s): \(monthList)."
+            importSession.importMessage = "Imported \(result.tilesCreated) one-off tile(s) across \(result.monthsAffected.count) month(s): \(monthList)."
             importSession.clear(keepMessages: true)
             typeFilter = nil
         } catch {
@@ -502,6 +689,7 @@ private struct ImportWorkflowStep: Identifiable {
     }
 
     let number: Int
+    let icon: String
     let title: String
     let subtitle: String
     let state: State
@@ -510,77 +698,116 @@ private struct ImportWorkflowStep: Identifiable {
 }
 
 private struct ImportWorkflowStepsView: View {
+    private let badgeSize: CGFloat = 44
+    private let connectorHeight: CGFloat = 3
+
     let steps: [ImportWorkflowStep]
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
-                if index > 0 {
-                    stepConnector(from: steps[index - 1].state, to: step.state)
+        VStack(spacing: 14) {
+            HStack(alignment: .center, spacing: 0) {
+                ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
+                    if index > 0 {
+                        stepConnector(from: steps[index - 1].state)
+                            .frame(maxWidth: .infinity)
+                    }
+                    stepBadge(step)
                 }
-                stepView(step)
-                    .frame(maxWidth: .infinity)
+            }
+
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(steps) { step in
+                    stepLabels(step)
+                        .frame(maxWidth: .infinity)
+                }
             }
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 12)
-        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+        .padding(.vertical, 18)
+        .padding(.horizontal, 20)
+        .background {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.quaternary.opacity(0.35))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(.quaternary, lineWidth: 1)
+                }
+        }
     }
 
     @ViewBuilder
-    private func stepView(_ step: ImportWorkflowStep) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            stepBadge(step)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(step.title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(step.state == .upcoming ? .tertiary : .primary)
-                Text(step.subtitle)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
+    private func stepLabels(_ step: ImportWorkflowStep) -> some View {
+        VStack(spacing: 4) {
+            Text(step.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(step.state == .upcoming ? .tertiary : .primary)
+                .multilineTextAlignment(.center)
+            Text(step.subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .opacity(step.state == .upcoming ? 0.55 : 1)
+        .opacity(step.state == .upcoming ? 0.6 : 1)
     }
 
     @ViewBuilder
     private func stepBadge(_ step: ImportWorkflowStep) -> some View {
-        Group {
-            switch step.state {
-            case .complete:
-                Image(systemName: "checkmark")
-                    .font(.caption2.weight(.bold))
-            case .current, .upcoming:
-                Text("\(step.number)")
-                    .font(.caption2.weight(.bold))
+        ZStack {
+            Circle()
+                .fill(stepBackground(step.state))
+                .frame(width: badgeSize, height: badgeSize)
+                .overlay {
+                    if step.state == .current {
+                        Circle()
+                            .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 4)
+                            .frame(width: badgeSize + 8, height: badgeSize + 8)
+                    }
+                }
+
+            Group {
+                switch step.state {
+                case .complete:
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.bold))
+                case .current, .upcoming:
+                    Image(systemName: step.icon)
+                        .font(.body.weight(.semibold))
+                }
             }
+            .foregroundStyle(stepForeground(step.state))
         }
-        .foregroundStyle(step.state == .current ? Color.white : Color.accentColor)
-        .frame(width: 22, height: 22)
-        .background(stepBackground(step.state), in: Circle())
+        .frame(width: badgeSize, height: badgeSize)
+        .accessibilityLabel("Step \(step.number): \(step.title)")
+    }
+
+    private func stepForeground(_ state: ImportWorkflowStep.State) -> Color {
+        switch state {
+        case .complete:
+            Color.accentColor
+        case .current:
+            Color.white
+        case .upcoming:
+            Color.accentColor.opacity(0.7)
+        }
     }
 
     private func stepBackground(_ state: ImportWorkflowStep.State) -> Color {
         switch state {
         case .complete:
-            Color.accentColor.opacity(0.2)
+            Color.accentColor.opacity(0.18)
         case .current:
             Color.accentColor
         case .upcoming:
-            Color.secondary.opacity(0.15)
+            Color.secondary.opacity(0.12)
         }
     }
 
-    private func stepConnector(
-        from previous: ImportWorkflowStep.State,
-        to current: ImportWorkflowStep.State
-    ) -> some View {
-        Rectangle()
-            .fill(previous == .complete ? Color.accentColor.opacity(0.35) : Color.secondary.opacity(0.2))
-            .frame(width: 24, height: 2)
-            .padding(.top, 10)
+    private func stepConnector(from previous: ImportWorkflowStep.State) -> some View {
+        Capsule()
+            .fill(previous == .complete ? Color.accentColor.opacity(0.45) : Color.secondary.opacity(0.22))
+            .frame(height: connectorHeight)
+            .padding(.horizontal, 4)
     }
 }
 
@@ -610,8 +837,14 @@ private struct FilterChip: View {
 }
 
 private struct ImportRowHeader: View {
+    let showsSelection: Bool
+
     var body: some View {
         HStack(spacing: 12) {
+            if showsSelection {
+                Text("Select")
+                    .frame(width: 28)
+            }
             Text("Date")
                 .frame(width: 90, alignment: .leading)
             Text("Payee")
@@ -625,7 +858,7 @@ private struct ImportRowHeader: View {
             Text("Amount")
                 .frame(width: 90, alignment: .trailing)
             Text("")
-                .frame(width: 28)
+                .frame(width: 56)
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
@@ -638,6 +871,11 @@ private struct ImportTransactionRowView: View {
     @Binding var row: ImportPreviewRow
     let currency: AppCurrency
     let payeeNoteIndex: [String: PayeeNote]
+    let isSelectable: Bool
+    let isSelected: Bool
+    let onToggleSelection: () -> Void
+    let onImport: () -> Void
+    let onCreateRecurringRule: () -> Void
     let onRemove: () -> Void
     let onEditPayeeNote: () -> Void
 
@@ -651,6 +889,19 @@ private struct ImportTransactionRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            if isSelectable {
+                Button(action: onToggleSelection) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 28)
+                .help(isSelected ? "Deselect" : "Select to group as monthly income")
+            } else if row.budgetType == .income {
+                Color.clear
+                    .frame(width: 28)
+            }
+
             Text(dateText)
                 .font(.caption)
                 .frame(width: 90, alignment: .leading)
@@ -701,19 +952,34 @@ private struct ImportTransactionRowView: View {
                 .font(.body.monospacedDigit())
                 .frame(width: 90, alignment: .trailing)
 
-            Button {
-                onRemove()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                Button(action: onImport) {
+                    Image(systemName: "square.and.arrow.down")
+                        .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+                .help("Import as one-off tile in this transaction's month")
+
+                Button {
+                    onRemove()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Exclude from import")
             }
-            .buttonStyle(.plain)
-            .help("Exclude from import")
-            .frame(width: 28)
+            .frame(width: 56)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .contextMenu {
+            Button("Import as one-off tile", systemImage: "square.and.arrow.down") {
+                onImport()
+            }
+            Button("Create recurring budget rule", systemImage: "arrow.triangle.2.circlepath") {
+                onCreateRecurringRule()
+            }
             Button("Edit payee label & notes", systemImage: "pencil") {
                 onEditPayeeNote()
             }

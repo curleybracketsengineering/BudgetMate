@@ -53,7 +53,7 @@ struct FirstRunSetupView: View {
         let settings = AppSettings()
         settings.planningStartYear = planningStartYear
         settings.planningStartMonth = planningStartMonth
-        settings.horizonMonths = 12
+        settings.horizonMonths = PlanningHorizon.baseMonths
         settings.currency = currency
         let startingBalance = MoneyFormatter.parseMajorUnits(startingBalanceText, currency: currency) ?? 0
         settings.startingBalanceMinorUnits = startingBalance

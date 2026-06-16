@@ -15,6 +15,8 @@ final class BudgetTile {
     var confidenceRaw: String = ConfidenceLevel.estimated.rawValue
     var commitmentRaw: String = CommitmentType.known.rawValue
     var linkedRuleId: UUID?
+    /// Distinguishes multiple recurring tiles in the same calendar month (e.g. two 4-weekly payments).
+    var recurringOccurrenceIndex: Int = 0
     var linkedHolidayActivityId: UUID?
     /// When nil, income/expenses use the primary (Main) account.
     var linkedAccountId: UUID?

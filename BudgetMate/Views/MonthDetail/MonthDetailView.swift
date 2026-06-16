@@ -5,6 +5,7 @@ struct MonthDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var settingsList: [AppSettings]
     @Query private var allTiles: [BudgetTile]
+    @Query private var rules: [BudgetRule]
     @Query(sort: \BankAccount.displayOrder) private var accounts: [BankAccount]
 
     let month: BudgetMonth
@@ -106,6 +107,10 @@ struct MonthDetailView: View {
         }
     }
 
+    private var displaySections: [PlanTileDisplaySection] {
+        PlanTileGroupingService.displaySections(tiles: monthTiles, rules: rules)
+    }
+
     private var tilesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Budget tiles")
@@ -115,35 +120,44 @@ struct MonthDetailView: View {
                 ContentUnavailableView("No tiles", systemImage: "tray", description: Text("Add a manual tile or generate from budget rules."))
                     .frame(maxWidth: .infinity, minHeight: 120)
             } else {
-                ForEach(groupedTiles.keys.sorted(), id: \.self) { group in
-                    Text(group)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(groupedTiles[group] ?? [], id: \.id) { tile in
-                        TileRowView(
-                            tile: tile,
+                ForEach(displaySections) { section in
+                    if section.isGrouped {
+                        GroupedTileRowView(
+                            title: section.title,
+                            itemCount: section.tiles.count,
+                            totalMinorUnits: section.totalMinorUnits,
                             currency: currency,
-                            accountName: hasMultipleAccounts && tile.type != .transfer
-                                ? BankAccountService.accountName(for: tile.linkedAccountId, accounts: accounts)
-                                : nil,
-                            transferDescription: tile.type == .transfer
-                                ? BankAccountService.transferDescription(
-                                    from: tile.linkedAccountId,
-                                    to: tile.transferToAccountId,
-                                    accounts: accounts
-                                )
-                                : nil
-                        ) {
-                            editingTile = tile
+                            tiles: section.tiles,
+                            hasMultipleAccounts: hasMultipleAccounts,
+                            accounts: accounts,
+                            onEditTile: { editingTile = $0 }
+                        )
+                    } else {
+                        Text(section.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ForEach(section.tiles, id: \.id) { tile in
+                            TileRowView(
+                                tile: tile,
+                                currency: currency,
+                                accountName: hasMultipleAccounts && tile.type != .transfer
+                                    ? BankAccountService.accountName(for: tile.linkedAccountId, accounts: accounts)
+                                    : nil,
+                                transferDescription: tile.type == .transfer
+                                    ? BankAccountService.transferDescription(
+                                        from: tile.linkedAccountId,
+                                        to: tile.transferToAccountId,
+                                        accounts: accounts
+                                    )
+                                    : nil
+                            ) {
+                                editingTile = tile
+                            }
                         }
                     }
                 }
             }
         }
-    }
-
-    private var groupedTiles: [String: [BudgetTile]] {
-        Dictionary(grouping: monthTiles) { "\($0.type.displayName) · \($0.source.displayName)" }
     }
 
     @ToolbarContentBuilder

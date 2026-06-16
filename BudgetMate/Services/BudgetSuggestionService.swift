@@ -2,6 +2,65 @@ import Foundation
 import SwiftData
 
 enum BudgetSuggestionService {
+    struct CreatedRuleResult {
+        let ruleID: UUID
+        let name: String
+    }
+
+    static func createRule(
+        from row: ImportPreviewRow,
+        payeeNotes: [String: PayeeNote],
+        in context: ModelContext
+    ) throws -> CreatedRuleResult {
+        let transaction = row.transaction
+        let payeeSample = transaction.payee
+        let name = PayeeNoteService.resolvedTitle(for: payeeSample, in: payeeNotes)
+
+        var (cycle, activeMonths, explanation) = TransactionAnalysisService.inferredCycle(for: row)
+        if cycle == .oneOff {
+            cycle = .monthly
+            explanation = "Monthly recurring item created from a single bank transaction. Confirm cycle in Budget Rules."
+        }
+
+        let rule = BudgetRule()
+        rule.name = name
+        rule.type = row.budgetType
+        rule.category = row.category
+        rule.amountMinorUnits = transaction.amountMinorUnits
+        rule.cycle = cycle
+        rule.startDate = transaction.date
+        rule.monthPatternRaw = activeMonths.map(String.init).joined(separator: ",")
+        rule.confidence = .estimated
+        rule.commitment = commitment(for: row)
+        rule.assumptionsNotes = assumptionsNotes(
+            explanation: explanation,
+            payeeSample: payeeSample,
+            name: name,
+            payeeNotes: payeeNotes
+        )
+        rule.isActive = true
+        rule.monthlyEquivalentMinorUnits = BudgetRuleService.calculatedMonthlyEquivalent(for: rule)
+        rule.markCreated()
+        context.insert(rule)
+
+        try context.save()
+        try AppDataService.generateAndRefresh(in: context)
+        return CreatedRuleResult(ruleID: rule.id, name: name)
+    }
+
+    static func deleteRule(id: UUID, in context: ModelContext) throws {
+        let rules = try context.fetch(FetchDescriptor<BudgetRule>())
+        guard let rule = rules.first(where: { $0.id == id }) else { return }
+
+        let tiles = try context.fetch(FetchDescriptor<BudgetTile>())
+        for tile in tiles where tile.linkedRuleId == id {
+            context.delete(tile)
+        }
+        context.delete(rule)
+        try context.save()
+        try AppDataService.refreshForecast(in: context)
+    }
+
     static func createRules(
         from suggestions: [BudgetSuggestion],
         in context: ModelContext
@@ -48,6 +107,35 @@ enum BudgetSuggestionService {
         previewRows.removeAll { linkedIDs.contains($0.transaction.id) }
         excludedRows.append(contentsOf: toExclude)
         excludedRows.sort { $0.transaction.date > $1.transaction.date }
+    }
+
+    private static func commitment(for row: ImportPreviewRow) -> CommitmentType {
+        switch row.budgetType {
+        case .expense where row.category == "Spending":
+            return .flexible
+        default:
+            return .known
+        }
+    }
+
+    private static func assumptionsNotes(
+        explanation: String,
+        payeeSample: String,
+        name: String,
+        payeeNotes: [String: PayeeNote]
+    ) -> String {
+        var parts = [explanation]
+        if let note = payeeNotes[PayeeNormalization.matchKey(payeeSample)] {
+            let userNotes = note.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !userNotes.isEmpty {
+                parts.append(userNotes)
+            }
+        }
+        if !payeeSample.isEmpty,
+           name.caseInsensitiveCompare(PayeeNormalization.displayName(from: payeeSample)) != .orderedSame {
+            parts.append("Bank payee: \(payeeSample)")
+        }
+        return parts.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     private static func combinedAssumptionsNotes(for suggestion: BudgetSuggestion) -> String {

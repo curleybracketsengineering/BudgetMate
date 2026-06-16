@@ -24,6 +24,8 @@ final class BudgetRule {
     var linkedAccountId: UUID?
     /// Destination account for transfers. Source is linkedAccountId (nil = Main).
     var transferToAccountId: UUID?
+    /// When false (default), generated tiles roll up into Income or Outgoings in the monthly plan.
+    var showIndividuallyInPlan: Bool = false
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
     var deviceId: String = ""
@@ -48,5 +50,21 @@ final class BudgetRule {
     var commitment: CommitmentType {
         get { CommitmentType(rawValue: commitmentRaw) ?? .known }
         set { commitmentRaw = newValue.rawValue }
+    }
+
+    /// When multiple records share an id, keep the active one, or the most recently updated.
+    static func preferDuplicate(_ existing: BudgetRule, _ duplicate: BudgetRule) -> BudgetRule {
+        let existingActive = existing.isActive && !existing.isArchived
+        let duplicateActive = duplicate.isActive && !duplicate.isArchived
+        if existingActive != duplicateActive {
+            return existingActive ? existing : duplicate
+        }
+        return existing.updatedAt >= duplicate.updatedAt ? existing : duplicate
+    }
+}
+
+extension Array where Element == BudgetRule {
+    func keyedById() -> [UUID: BudgetRule] {
+        Dictionary(map { ($0.id, $0) }, uniquingKeysWith: BudgetRule.preferDuplicate)
     }
 }

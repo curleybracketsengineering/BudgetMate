@@ -20,7 +20,7 @@ struct DashboardView: View {
             startMonth: settings.planningStartMonth,
             count: settings.horizonMonths
         )
-        let byKey = Dictionary(uniqueKeysWithValues: allMonths.map { ($0.monthKey, $0) })
+        let byKey = allMonths.keyedByMonthKey()
         return sequence.compactMap { byKey["\($0.year)-\($0.month)"] }
     }
 

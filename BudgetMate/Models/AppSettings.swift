@@ -6,7 +6,7 @@ final class AppSettings {
     var id: UUID = UUID()
     var planningStartYear: Int = 2026
     var planningStartMonth: Int = 1
-    var horizonMonths: Int = 12
+    var horizonMonths: Int = PlanningHorizon.baseMonths
     var startingBalanceMinorUnits: Int = 0
     var safeThresholdMinorUnits: Int = 5_000_00
     var warningThresholdMinorUnits: Int = 2_000_00
@@ -24,5 +24,9 @@ final class AppSettings {
     var currency: AppCurrency {
         get { AppCurrency(rawValue: currencyCode) ?? .GBP }
         set { currencyCode = newValue.rawValue }
+    }
+
+    var planningStartDate: Date {
+        PlanningCalendar.firstDayOfMonth(year: planningStartYear, month: planningStartMonth)
     }
 }

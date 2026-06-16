@@ -11,14 +11,30 @@ final class FeatureGateService {
     }
 
     func maxHorizonMonths() -> Int {
-        isProUnlocked ? 60 : 12
+        isProUnlocked ? PlanningHorizon.months(forYears: 10) : PlanningHorizon.baseMonths
     }
 
     func allowedHorizons() -> [Int] {
         if isProUnlocked {
-            return [12, 24, 36, 60]
+            return stride(
+                from: PlanningHorizon.baseMonths,
+                through: maxHorizonMonths(),
+                by: PlanningHorizon.monthsPerYear
+            ).map { $0 }
         }
-        return [12]
+        return [PlanningHorizon.baseMonths]
+    }
+
+    func canExtendHorizon(currentMonths: Int) -> Bool {
+        currentMonths < maxHorizonMonths()
+    }
+
+    /// Snaps a stored horizon to the nearest valid option (e.g. legacy 12-month plans → 3 years).
+    func normalizedHorizon(_ months: Int) -> Int {
+        let allowed = allowedHorizons()
+        if allowed.contains(months) { return months }
+        if let next = allowed.first(where: { $0 >= months }) { return next }
+        return allowed.last ?? PlanningHorizon.baseMonths
     }
 
     enum ProFeature: String, CaseIterable {
@@ -38,7 +54,7 @@ final class FeatureGateService {
 
         var displayName: String {
             switch self {
-            case .extendedForecast: "36/60-month forecast"
+            case .extendedForecast: "Extra plan years (4+)"
             case .scenarios: "Scenario planning"
             case .holidayPlanner: "Holiday & event planner"
             case .csvImport: "CSV / QBO import"

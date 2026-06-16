@@ -22,6 +22,8 @@ struct BudgetSuggestion: Identifiable, Hashable {
     var linkedTransactionIDs: Set<UUID>
     var isAccepted: Bool
     var isIgnored: Bool
+    /// User grouped transactions manually from the preview list (not auto-detected).
+    var isManual: Bool
     var payeeMatchKey: String
     var userNotes: String
     var bankPayeeSample: String
@@ -46,6 +48,7 @@ struct BudgetSuggestion: Identifiable, Hashable {
         linkedTransactionIDs: Set<UUID>,
         isAccepted: Bool = false,
         isIgnored: Bool = false,
+        isManual: Bool = false,
         payeeMatchKey: String = "",
         userNotes: String = "",
         bankPayeeSample: String = ""
@@ -69,6 +72,7 @@ struct BudgetSuggestion: Identifiable, Hashable {
         self.linkedTransactionIDs = linkedTransactionIDs
         self.isAccepted = isAccepted
         self.isIgnored = isIgnored
+        self.isManual = isManual
         self.payeeMatchKey = payeeMatchKey
         self.userNotes = userNotes
         self.bankPayeeSample = bankPayeeSample

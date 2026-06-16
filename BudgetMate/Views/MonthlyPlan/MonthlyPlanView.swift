@@ -3,9 +3,11 @@ import SwiftData
 
 struct MonthlyPlanView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(FeatureGateService.self) private var featureGate
     @Query private var settingsList: [AppSettings]
     @Query(sort: [SortDescriptor(\BudgetMonth.year), SortDescriptor(\BudgetMonth.month)]) private var allMonths: [BudgetMonth]
     @Query private var allTiles: [BudgetTile]
+    @Query private var rules: [BudgetRule]
 
     @Binding var selectedMonth: BudgetMonth?
 
@@ -18,31 +20,47 @@ struct MonthlyPlanView: View {
             startMonth: settings.planningStartMonth,
             count: settings.horizonMonths
         )
-        let byKey = Dictionary(uniqueKeysWithValues: allMonths.map { ($0.monthKey, $0) })
+        let byKey = allMonths.keyedByMonthKey()
         return sequence.compactMap { byKey["\($0.year)-\($0.month)"] }
+    }
+
+    private var hasActiveRules: Bool {
+        rules.contains { $0.isActive && !$0.isArchived }
+    }
+
+    private var hasPlanActivity: Bool {
+        allTiles.contains(where: \.isActive)
     }
 
     var body: some View {
         Group {
             if let settings {
                 ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 16)], spacing: 16) {
-                        ForEach(orderedMonths, id: \.id) { month in
-                            let tiles = CashFlowService.tilesForMonth(year: month.year, month: month.month, from: allTiles)
-                            let totals = CashFlowService.totals(for: tiles)
-                            Button {
-                                selectedMonth = month
-                            } label: {
-                                MonthCardView(
-                                    month: month,
-                                    settings: settings,
-                                    income: totals.income,
-                                    expense: totals.expense,
-                                    isSelected: selectedMonth?.id == month.id
-                                )
-                            }
-                            .buttonStyle(.plain)
+                    VStack(spacing: 16) {
+                        if hasActiveRules && !hasPlanActivity {
+                            emptyPlanBanner
                         }
+
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 16)], spacing: 16) {
+                            ForEach(orderedMonths, id: \.id) { month in
+                                let tiles = CashFlowService.tilesForMonth(year: month.year, month: month.month, from: allTiles)
+                                let totals = CashFlowService.totals(for: tiles)
+                                Button {
+                                    selectedMonth = month
+                                } label: {
+                                    MonthCardView(
+                                        month: month,
+                                        settings: settings,
+                                        income: totals.income,
+                                        expense: totals.expense,
+                                        isSelected: selectedMonth?.id == month.id
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+
+                        planLengthFooter(settings)
                     }
                     .padding()
                 }
@@ -52,10 +70,89 @@ struct MonthlyPlanView: View {
         }
         .navigationTitle("Monthly Plan")
         .onAppear { ensureData() }
+        .toolbar {
+            if let settings, featureGate.canExtendHorizon(currentMonths: settings.horizonMonths) {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        extendPlan(byYears: 1, settings: settings)
+                    } label: {
+                        Label("Add year", systemImage: "plus.circle")
+                    }
+                    .help("Extend your plan by one year")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func planLengthFooter(_ settings: AppSettings) -> some View {
+        VStack(spacing: 10) {
+            Text("Planning \(PlanningHorizon.label(forMonths: settings.horizonMonths))")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            if featureGate.canExtendHorizon(currentMonths: settings.horizonMonths) {
+                Button {
+                    extendPlan(byYears: 1, settings: settings)
+                } label: {
+                    Label("Add year to plan", systemImage: "calendar.badge.plus")
+                }
+                .buttonStyle(.bordered)
+            } else if !featureGate.isProUnlocked {
+                Label("Pro unlocks extra years beyond \(PlanningHorizon.baseYears)", systemImage: "star.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
+    }
+
+    private func extendPlan(byYears years: Int, settings: AppSettings) {
+        do {
+            try AppDataService.extendHorizon(
+                byYears: years,
+                settings: settings,
+                maxMonths: featureGate.maxHorizonMonths(),
+                in: modelContext
+            )
+        } catch {
+            print("Extend plan failed: \(error)")
+        }
+    }
+
+    private var emptyPlanBanner: some View {
+        let periodLabel = settings.flatMap { BudgetRuleService.PlanningPeriod.from(settings: $0)?.label }
+
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("No tiles in your plan yet")
+                    .font(.subheadline.weight(.semibold))
+                if let periodLabel {
+                    Text("Your planning period is \(periodLabel) (Settings). Tiles are created from each rule's start date, and stop at its end date if set. Check those dates in Budget Rules, then tap Generate Tiles.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Go to Budget Rules and tap Generate Tiles, or save a rule to fill your monthly plan.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func ensureData() {
         guard let settings else { return }
+        let normalized = featureGate.normalizedHorizon(settings.horizonMonths)
+        if normalized != settings.horizonMonths {
+            settings.horizonMonths = normalized
+            settings.markUpdated()
+        }
         do {
             _ = try AppDataService.ensureMonths(settings: settings, in: modelContext)
             try AppDataService.refreshForecast(in: modelContext)
