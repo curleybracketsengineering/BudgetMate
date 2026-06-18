@@ -28,7 +28,7 @@ struct AppShellView: View {
         }
         .onAppear { checkFirstRun() }
         .onChange(of: selection) {
-            if selection != .monthlyPlan {
+            if selection != .monthlyPlan  {
                 selectedMonth = nil
             }
             if selection != .budgetRules {
