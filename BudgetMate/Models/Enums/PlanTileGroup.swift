@@ -42,6 +42,7 @@ enum PlanTileGroup: String, CaseIterable, Identifiable {
 
     static func showsIndividually(tile: BudgetTile, rule: BudgetRule?) -> Bool {
         if let rule, tile.linkedRuleId == rule.id {
+            if rule.cycle == .oneOff { return true }
             return rule.showIndividuallyInPlan
         }
         return true
@@ -51,7 +52,7 @@ enum PlanTileGroup: String, CaseIterable, Identifiable {
 struct PlanTileDisplaySection: Identifiable {
     enum Kind {
         case grouped(PlanTileGroup)
-        case individual
+        case tiles
     }
 
     let kind: Kind
@@ -62,12 +63,17 @@ struct PlanTileDisplaySection: Identifiable {
     var id: String {
         switch kind {
         case .grouped(let group): "group-\(group.rawValue)"
-        case .individual: "individual"
+        case .tiles: "tiles"
         }
     }
 
     var isGrouped: Bool {
         if case .grouped = kind { return true }
+        return false
+    }
+
+    var isTilesSection: Bool {
+        if case .tiles = kind { return true }
         return false
     }
 }
@@ -79,14 +85,14 @@ enum PlanTileGroupingService {
     ) -> [PlanTileDisplaySection] {
         let rulesById = rules.keyedById()
         var grouped: [PlanTileGroup: [BudgetTile]] = [:]
-        var individual: [BudgetTile] = []
+        var tileItems: [BudgetTile] = []
 
         for tile in tiles {
             let rule = tile.linkedRuleId.flatMap { rulesById[$0] }
             if let group = PlanTileGroup.forTile(tile, rule: rule) {
                 grouped[group, default: []].append(tile)
             } else {
-                individual.append(tile)
+                tileItems.append(tile)
             }
         }
 
@@ -102,17 +108,15 @@ enum PlanTileGroupingService {
             )
         }
 
-        if !individual.isEmpty {
-            let sortedIndividual = sortTiles(individual, rulesById: rulesById)
-            sections.append(
-                PlanTileDisplaySection(
-                    kind: .individual,
-                    title: "Individual items",
-                    tiles: sortedIndividual,
-                    totalMinorUnits: sortedIndividual.reduce(0) { $0 + $1.amountMinorUnits }
-                )
+        let sortedTiles = sortTiles(tileItems, rulesById: rulesById)
+        sections.append(
+            PlanTileDisplaySection(
+                kind: .tiles,
+                title: "Tiles",
+                tiles: sortedTiles,
+                totalMinorUnits: sortedTiles.reduce(0) { $0 + $1.amountMinorUnits }
             )
-        }
+        )
 
         return sections
     }

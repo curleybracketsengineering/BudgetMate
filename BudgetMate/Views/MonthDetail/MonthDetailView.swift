@@ -10,11 +10,13 @@ struct MonthDetailView: View {
 
     let month: BudgetMonth
 
-    @State private var showingAddTile = false
+    @State private var showingAddOneOff = false
     @State private var editingTile: BudgetTile?
+    @State private var editingRule: BudgetRule?
 
     private var settings: AppSettings? { settingsList.first }
     private var currency: AppCurrency { settings?.currency ?? .GBP }
+    private var rulesById: [UUID: BudgetRule] { rules.keyedById() }
 
     private var monthTiles: [BudgetTile] {
         CashFlowService.tilesForMonth(year: month.year, month: month.month, from: allTiles)
@@ -52,11 +54,19 @@ struct MonthDetailView: View {
         }
         .navigationTitle(month.displayTitle)
         .toolbar { toolbarContent }
-        .sheet(isPresented: $showingAddTile) {
-            BudgetTileFormView(currency: currency, defaultYear: month.year, defaultMonth: month.month)
+        .sheet(isPresented: $showingAddOneOff) {
+            OneOffRuleFormView(
+                currency: currency,
+                year: month.year,
+                month: month.month,
+                isMonthLocked: month.isLocked
+            )
         }
         .sheet(item: $editingTile) { tile in
             BudgetTileFormView(currency: currency, existingTile: tile, defaultYear: month.year, defaultMonth: month.month)
+        }
+        .sheet(item: $editingRule) { rule in
+            BudgetRuleFormView(currency: currency, existingRule: rule)
         }
     }
 
@@ -116,11 +126,7 @@ struct MonthDetailView: View {
             Text("Budget tiles")
                 .font(.title3.weight(.semibold))
 
-            if monthTiles.isEmpty {
-                ContentUnavailableView("No tiles", systemImage: "tray", description: Text("Add a manual tile or generate from budget rules."))
-                    .frame(maxWidth: .infinity, minHeight: 120)
-            } else {
-                ForEach(displaySections) { section in
+            ForEach(displaySections) { section in
                     if section.isGrouped {
                         GroupedTileRowView(
                             title: section.title,
@@ -130,16 +136,35 @@ struct MonthDetailView: View {
                             tiles: section.tiles,
                             hasMultipleAccounts: hasMultipleAccounts,
                             accounts: accounts,
-                            onEditTile: { editingTile = $0 }
+                            rulesById: rulesById,
+                            onEditTile: editTile
                         )
                     } else {
-                        Text(section.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                        HStack {
+                            Text(section.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            if section.isTilesSection {
+                                Button {
+                                    showingAddOneOff = true
+                                } label: {
+                                    Label("Add One-off", systemImage: "plus")
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                        if section.tiles.isEmpty && section.isTilesSection {
+                            Text("No one-off items yet.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 4)
+                        }
                         ForEach(section.tiles, id: \.id) { tile in
                             TileRowView(
                                 tile: tile,
                                 currency: currency,
+                                ruleCycle: tile.linkedRuleId.flatMap { rulesById[$0]?.cycle },
                                 accountName: hasMultipleAccounts && tile.type != .transfer
                                     ? BankAccountService.accountName(for: tile.linkedAccountId, accounts: accounts)
                                     : nil,
@@ -151,12 +176,11 @@ struct MonthDetailView: View {
                                     )
                                     : nil
                             ) {
-                                editingTile = tile
+                                editTile(tile)
                             }
                         }
                     }
                 }
-            }
         }
     }
 
@@ -164,9 +188,9 @@ struct MonthDetailView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup {
             Button {
-                showingAddTile = true
+                showingAddOneOff = true
             } label: {
-                Label("Add Tile", systemImage: "plus")
+                Label("Add One-off", systemImage: "plus")
             }
 
             Button {
@@ -180,6 +204,14 @@ struct MonthDetailView: View {
             } label: {
                 Label("Recalculate", systemImage: "arrow.clockwise")
             }
+        }
+    }
+
+    private func editTile(_ tile: BudgetTile) {
+        if let ruleId = tile.linkedRuleId, let rule = rulesById[ruleId] {
+            editingRule = rule
+        } else {
+            editingTile = tile
         }
     }
 

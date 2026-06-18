@@ -8,6 +8,7 @@ struct GroupedTileRowView: View {
     let tiles: [BudgetTile]
     let hasMultipleAccounts: Bool
     let accounts: [BankAccount]
+    var rulesById: [UUID: BudgetRule] = [:]
     var onEditTile: (BudgetTile) -> Void
 
     @State private var isExpanded = false
@@ -47,6 +48,7 @@ struct GroupedTileRowView: View {
                         TileRowView(
                             tile: tile,
                             currency: currency,
+                            ruleCycle: tile.linkedRuleId.flatMap { rulesById[$0]?.cycle },
                             accountName: hasMultipleAccounts && tile.type != .transfer
                                 ? BankAccountService.accountName(for: tile.linkedAccountId, accounts: accounts)
                                 : nil,

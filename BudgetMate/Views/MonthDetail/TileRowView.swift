@@ -3,9 +3,15 @@ import SwiftUI
 struct TileRowView: View {
     let tile: BudgetTile
     let currency: AppCurrency
+    var ruleCycle: BudgetCycleType?
     var accountName: String?
     var transferDescription: String?
     var onEdit: () -> Void
+
+    private var sourceLabel: String {
+        if ruleCycle == .oneOff { return "One-off" }
+        return tile.source.displayName
+    }
 
     var body: some View {
         HStack {
@@ -15,7 +21,7 @@ struct TileRowView: View {
                 HStack(spacing: 8) {
                     Text(tile.type.displayName)
                     Text("·")
-                    Text(tile.source.displayName)
+                    Text(sourceLabel)
                     if let transferDescription {
                         Text("·")
                         Text(transferDescription)
