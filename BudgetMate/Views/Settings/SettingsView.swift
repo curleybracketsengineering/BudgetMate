@@ -50,6 +50,10 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .navigationTitle("Settings")
         .onAppear { loadFromSettings() }
+        .onDisappear {
+            guard didLoad else { return }
+            save(settings)
+        }
         .onChange(of: planningStartMonth) { save(settings) }
         .onChange(of: planningStartYear) { save(settings) }
         .onChange(of: horizonMonths) { save(settings) }

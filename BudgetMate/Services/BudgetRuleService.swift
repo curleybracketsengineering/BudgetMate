@@ -2,6 +2,20 @@ import Foundation
 import SwiftData
 
 enum BudgetRuleService {
+    enum OrderGroup {
+        case incoming
+        case outgoing
+        case other
+
+        static func forType(_ type: BudgetType) -> OrderGroup {
+            switch type {
+            case .income: .incoming
+            case .expense, .saving: .outgoing
+            case .transfer, .adjustment: .other
+            }
+        }
+    }
+
     enum DeletionError: Error {
         case notArchived
     }
@@ -58,10 +72,14 @@ enum BudgetRuleService {
 
     static func activeMonthCount(for rule: BudgetRule) -> Int {
         let months = parseMonthPattern(rule.monthPatternRaw)
-        if rule.cycle == .tenMonthly, !months.isEmpty {
+        switch rule.cycle {
+        case .tenMonthly:
+            return months.isEmpty ? 10 : months.count
+        case .custom:
             return months.count
+        default:
+            return 10
         }
-        return 10
     }
 
     static func expiringSoon(from rules: [BudgetRule], withinMonths: Int = 3) -> [BudgetRule] {
@@ -215,6 +233,34 @@ enum BudgetRuleService {
 
     static func recurringTiles(for rule: BudgetRule, in tiles: [BudgetTile]) -> [BudgetTile] {
         tiles.filter { $0.linkedRuleId == rule.id && $0.source == .recurring }
+    }
+
+    static func sorted(_ rules: [BudgetRule]) -> [BudgetRule] {
+        rules.sorted { lhs, rhs in
+            if lhs.displayOrder != rhs.displayOrder {
+                return lhs.displayOrder < rhs.displayOrder
+            }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    static func rules(in group: OrderGroup, from rules: [BudgetRule]) -> [BudgetRule] {
+        sorted(rules.filter { OrderGroup.forType($0.type) == group })
+    }
+
+    static func assignDisplayOrderForNewRule(_ rule: BudgetRule, in context: ModelContext) throws {
+        let all = try context.fetch(FetchDescriptor<BudgetRule>())
+        let group = OrderGroup.forType(rule.type)
+        let inGroup = all.filter { OrderGroup.forType($0.type) == group && $0.id != rule.id }
+        rule.displayOrder = (inGroup.map(\.displayOrder).max() ?? -1) + 1
+    }
+
+    static func persistDisplayOrder(_ orderedRules: [BudgetRule], in context: ModelContext) throws {
+        for (index, rule) in orderedRules.enumerated() {
+            rule.displayOrder = index
+            rule.markUpdated()
+        }
+        try context.save()
     }
 
     static func deletePermanently(

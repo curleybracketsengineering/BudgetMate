@@ -4,7 +4,7 @@ import SwiftData
 struct BudgetRulesListView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(FeatureGateService.self) private var featureGate
-    @Query(sort: \BudgetRule.name) private var rules: [BudgetRule]
+    @Query(sort: [SortDescriptor(\BudgetRule.displayOrder), SortDescriptor(\BudgetRule.name)]) private var rules: [BudgetRule]
     @Query private var settingsList: [AppSettings]
     @Query private var tiles: [BudgetTile]
     @Query(sort: \BankAccount.displayOrder) private var accounts: [BankAccount]
@@ -20,12 +20,44 @@ struct BudgetRulesListView: View {
 
     private var currency: AppCurrency { settingsList.first?.currency ?? .GBP }
 
+    private var trimmedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var filteredRules: [BudgetRule] {
         rules.filter { rule in
             matchesArchiveFilter(rule) &&
-            (searchText.isEmpty || rule.name.localizedCaseInsensitiveContains(searchText)) &&
+            matchesSearchFilter(rule) &&
             matchesAccountFilter(rule)
         }
+    }
+
+    private func matchesSearchFilter(_ rule: BudgetRule) -> Bool {
+        let query = trimmedSearchText
+        guard !query.isEmpty else { return true }
+        if rule.name.localizedCaseInsensitiveContains(query) {
+            return true
+        }
+        return matchesRuleAmount(rule, query: query)
+    }
+
+    private func matchesRuleAmount(_ rule: BudgetRule, query: String) -> Bool {
+        let formatted = MoneyFormatter.format(minorUnits: rule.amountMinorUnits, currency: currency)
+        if formatted.localizedCaseInsensitiveContains(query) {
+            return true
+        }
+
+        let majorUnits = MoneyFormatter.majorUnitsString(minorUnits: rule.amountMinorUnits, currency: currency)
+        if majorUnits.localizedCaseInsensitiveContains(query) {
+            return true
+        }
+
+        if let parsedMinor = MoneyFormatter.parseMajorUnits(query, currency: currency),
+           parsedMinor == rule.amountMinorUnits {
+            return true
+        }
+
+        return false
     }
 
     /// Default (`showArchived == false`): live rules only. Archived mode: archived rules only.
@@ -62,15 +94,19 @@ struct BudgetRulesListView: View {
     }
 
     private var incomingRules: [BudgetRule] {
-        filteredRules.filter { $0.type == .income }
+        BudgetRuleService.rules(in: .incoming, from: filteredRules)
     }
 
     private var outgoingRules: [BudgetRule] {
-        filteredRules.filter { $0.type == .expense || $0.type == .saving }
+        BudgetRuleService.rules(in: .outgoing, from: filteredRules)
     }
 
     private var otherRules: [BudgetRule] {
-        filteredRules.filter { $0.type == .transfer || $0.type == .adjustment }
+        BudgetRuleService.rules(in: .other, from: filteredRules)
+    }
+
+    private var canReorder: Bool {
+        trimmedSearchText.isEmpty && filterAccountId == nil
     }
 
     private var hasAnyRules: Bool {
@@ -84,7 +120,7 @@ struct BudgetRulesListView: View {
             mainContent
         }
         .navigationTitle("Budget Rules")
-        .searchable(text: $searchText, prompt: "Search rules")
+        .searchable(text: $searchText, prompt: "Search by name or amount")
         .toolbar { toolbarContent }
         .sheet(isPresented: $showingNewRule, onDismiss: { newRuleTemplate = nil }) {
             BudgetRuleFormView(currency: currency, template: newRuleTemplate)
@@ -205,17 +241,13 @@ struct BudgetRulesListView: View {
         List(selection: $selectedRule) {
             if !incomingRules.isEmpty {
                 Section("Incoming") {
-                    ForEach(incomingRules, id: \.id) { rule in
-                        ruleRow(rule)
-                    }
+                    reorderableRuleRows(incomingRules, move: moveIncomingRules)
                 }
             }
 
             if !outgoingRules.isEmpty {
                 Section("Outgoing") {
-                    ForEach(outgoingRules, id: \.id) { rule in
-                        ruleRow(rule)
-                    }
+                    reorderableRuleRows(outgoingRules, move: moveOutgoingRules)
                 }
             }
 
@@ -237,11 +269,30 @@ struct BudgetRulesListView: View {
                 )
             }
         }
+        .listStyle(.plain)
+        .environment(\.defaultMinListRowHeight, 32)
+    }
+
+    @ViewBuilder
+    private func reorderableRuleRows(
+        _ groupRules: [BudgetRule],
+        move: @escaping (IndexSet, Int) -> Void
+    ) -> some View {
+        if canReorder {
+            ForEach(groupRules, id: \.id) { rule in
+                ruleRow(rule)
+            }
+            .onMove(perform: move)
+        } else {
+            ForEach(groupRules, id: \.id) { rule in
+                ruleRow(rule)
+            }
+        }
     }
 
     private func ruleRow(_ rule: BudgetRule) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(rule.name)
                     if BudgetRuleService.isExpiringSoon(rule), featureGate.isAvailable(.ruleExpiryWarnings) {
@@ -250,18 +301,24 @@ struct BudgetRulesListView: View {
                             .foregroundStyle(.orange)
                     }
                 }
-                Text(ruleSubtitle(rule))
+                Text(ruleMetadataSubtitle(rule))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
-            if rule.isArchived {
-                Text("Archived")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(ruleAmountLabel(rule))
+                    .font(.body.weight(.medium).monospacedDigit())
+                if rule.isArchived {
+                    Text("Archived")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
+        .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
         .tag(rule)
+        .help(canReorder ? "Drag to reorder within this group" : "")
         .contextMenu {
             if rule.isArchived {
                 Button("Restore") { restore(rule) }
@@ -275,12 +332,13 @@ struct BudgetRulesListView: View {
         }
     }
 
-    private func ruleSubtitle(_ rule: BudgetRule) -> String {
-        let monthly = MoneyFormatter.format(
-            minorUnits: BudgetRuleService.monthlyEquivalent(for: rule),
-            currency: currency
-        )
-        var parts = ["\(rule.cycle.displayName)", "\(monthly) / month"]
+    private func ruleAmountLabel(_ rule: BudgetRule) -> String {
+        let amount = MoneyFormatter.format(minorUnits: rule.amountMinorUnits, currency: currency)
+        return "\(amount)\(rule.cycle.amountPeriodSuffix)"
+    }
+
+    private func ruleMetadataSubtitle(_ rule: BudgetRule) -> String {
+        var parts = [rule.cycle.displayName]
         if !rule.showIndividuallyInPlan, rule.type == .income || rule.type == .expense || rule.type == .saving {
             parts.append("Grouped in plan")
         }
@@ -302,6 +360,30 @@ struct BudgetRulesListView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup {
+            Menu {
+                Button {
+                    printBudgetRules()
+                } label: {
+                    Label("Print…", systemImage: "printer")
+                }
+
+                Button {
+                    exportBudgetRulesPDF()
+                } label: {
+                    Label("Save as PDF…", systemImage: "doc.richtext")
+                }
+
+                Button {
+                    exportBudgetRulesCSV()
+                } label: {
+                    Label("Save as CSV…", systemImage: "tablecells")
+                }
+            } label: {
+                Label("Export", systemImage: "printer")
+            }
+            .disabled(!hasAnyRules || filteredRules.isEmpty)
+            .help("Print or export budget rules")
+
             Button {
                 showingNewRule = true
             } label: {
@@ -325,6 +407,24 @@ struct BudgetRulesListView: View {
                     Button("Archive") { archive(selectedRule) }
                 }
             }
+        }
+    }
+
+    private func moveIncomingRules(from source: IndexSet, to destination: Int) {
+        moveRules(in: incomingRules, from: source, to: destination)
+    }
+
+    private func moveOutgoingRules(from source: IndexSet, to destination: Int) {
+        moveRules(in: outgoingRules, from: source, to: destination)
+    }
+
+    private func moveRules(in groupRules: [BudgetRule], from source: IndexSet, to destination: Int) {
+        var ordered = groupRules
+        ordered.move(fromOffsets: source, toOffset: destination)
+        do {
+            try BudgetRuleService.persistDisplayOrder(ordered, in: modelContext)
+        } catch {
+            print("Reorder rules failed: \(error)")
         }
     }
 
@@ -400,6 +500,67 @@ struct BudgetRulesListView: View {
             return "Could not read plan settings."
         }
         return BudgetRuleService.generateTilesEmptyMessage(for: rules, settings: settings)
+    }
+
+    private var exportFootnote: String? {
+        var footnotes: [String] = []
+        if showArchived {
+            footnotes.append("Showing archived rules only.")
+        }
+        if let filterAccountId {
+            footnotes.append("Filtered to \(BankAccountService.accountName(for: filterAccountId, accounts: accounts)).")
+        }
+        if !trimmedSearchText.isEmpty {
+            footnotes.append("Filtered by search: \"\(trimmedSearchText)\".")
+        }
+        return footnotes.isEmpty ? nil : footnotes.joined(separator: " ")
+    }
+
+    private func budgetRulesPrintView() -> BudgetRulesPrintView {
+        BudgetRulesPrintView(
+            summary: summary,
+            currency: currency,
+            incoming: printableRows(for: incomingRules),
+            outgoing: printableRows(for: outgoingRules),
+            other: printableRows(for: otherRules),
+            footnote: exportFootnote
+        )
+    }
+
+    private func printBudgetRules() {
+        PrintService.print(title: "Budget Rules") {
+            budgetRulesPrintView()
+        }
+    }
+
+    private func exportBudgetRulesPDF() {
+        PrintService.exportPDF(title: "Budget Rules") {
+            budgetRulesPrintView()
+        }
+    }
+
+    private func exportBudgetRulesCSV() {
+        let data = ExportService.budgetRulesCSVData(
+            summary: summary,
+            currency: currency,
+            incoming: printableRows(for: incomingRules),
+            outgoing: printableRows(for: outgoingRules),
+            other: printableRows(for: otherRules),
+            footnote: exportFootnote
+        )
+        ExportService.saveCSV(data: data, suggestedFilename: "Budget Rules.csv")
+    }
+
+    private func printableRows(for rules: [BudgetRule]) -> [PrintableBudgetRuleRow] {
+        rules.map { rule in
+            PrintableBudgetRuleRow(
+                id: rule.id,
+                name: rule.name,
+                metadata: ruleMetadataSubtitle(rule),
+                amount: ruleAmountLabel(rule),
+                badge: rule.isArchived ? "Archived" : nil
+            )
+        }
     }
 }
 

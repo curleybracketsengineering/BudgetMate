@@ -18,7 +18,7 @@ final class BudgetRule {
     var confidenceRaw: String = ConfidenceLevel.estimated.rawValue
     var commitmentRaw: String = CommitmentType.known.rawValue
     var assumptionsNotes: String = ""
-    /// Comma-separated calendar months (1–12) when cycle is tenMonthly, e.g. "4,5,6,7,8,9,10,11,12,1"
+    /// Comma-separated calendar months (1–12) when cycle is tenMonthly or custom, e.g. "4,5,6,7,8,9,10,11,12,1"
     var monthPatternRaw: String = ""
     /// When nil, income/expenses use the primary (Main) account.
     var linkedAccountId: UUID?
@@ -26,6 +26,8 @@ final class BudgetRule {
     var transferToAccountId: UUID?
     /// When false (default), generated tiles roll up into Income or Outgoings in the monthly plan.
     var showIndividuallyInPlan: Bool = false
+    /// Sort order within the Incoming or Outgoing group in Budget Rules (and grouped plan tiles).
+    var displayOrder: Int = 0
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
     var deviceId: String = ""

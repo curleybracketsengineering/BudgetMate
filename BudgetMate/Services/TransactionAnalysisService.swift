@@ -61,7 +61,9 @@ enum TransactionAnalysisService {
         guard !rows.isEmpty else { return nil }
 
         let sorted = rows.sorted { $0.transaction.date < $1.transaction.date }
-        guard sorted.allSatisfy({ $0.budgetType == .income }) else { return nil }
+        guard let budgetType = sorted.first?.budgetType else { return nil }
+        guard budgetType == .income || budgetType == .expense || budgetType == .saving else { return nil }
+        guard sorted.allSatisfy({ $0.budgetType == budgetType }) else { return nil }
 
         let dates = sorted.map(\.transaction.date)
         let amounts = sorted.map(\.transaction.amountMinorUnits)
@@ -77,19 +79,15 @@ enum TransactionAnalysisService {
             analysisMonthCount: analysisMonthCount
         )
 
-        let explanation: String
-        switch cycle {
-        case .monthly:
-            explanation = sorted.count == 1
-                ? "Manually marked as monthly income (only one payment in this import; confirm in Budget Rules)."
-                : "Manually grouped as monthly income — \(sorted.count) payments."
-        default:
-            explanation = "Manually grouped recurring income — \(sorted.count) payment(s)."
-        }
+        let explanation = manualSuggestionExplanation(
+            budgetType: budgetType,
+            cycle: cycle,
+            paymentCount: sorted.count
+        )
 
         var suggestion = BudgetSuggestion(
             name: PayeeNormalization.displayName(from: payeeSample),
-            budgetType: .income,
+            budgetType: budgetType,
             category: representative.category,
             cycle: cycle,
             amountMinorUnits: perOccurrence,
@@ -109,6 +107,31 @@ enum TransactionAnalysisService {
         )
         PayeeNoteService.apply(to: &suggestion, payeeSample: payeeSample, notes: payeeNotes)
         return suggestion
+    }
+
+    private static func manualSuggestionExplanation(
+        budgetType: BudgetType,
+        cycle: BudgetCycleType,
+        paymentCount: Int
+    ) -> String {
+        let recurringLabel: String = {
+            switch budgetType {
+            case .income: "income"
+            case .expense: "bill"
+            case .saving: "saving"
+            default: "payment"
+            }
+        }()
+
+        switch cycle {
+        case .monthly:
+            if paymentCount == 1 {
+                return "Manually marked as monthly \(recurringLabel) (only one payment in this import; confirm in Budget Rules)."
+            }
+            return "Manually grouped as monthly \(recurringLabel) — \(paymentCount) payments."
+        default:
+            return "Manually grouped recurring \(recurringLabel) — \(paymentCount) payment(s)."
+        }
     }
 
     static func typicalMonth(
@@ -280,6 +303,10 @@ enum TransactionAnalysisService {
                 return (.quarterly, [], "Quarterly — roughly every 3 months.")
             }
 
+            if medianInterval >= 175 && medianInterval <= 190 {
+                return (.twiceYearly, [], "Twice yearly — roughly every 6 months.")
+            }
+
             if medianInterval >= 350 && medianInterval <= 380 {
                 return (.yearly, [], "Yearly payment.")
             }
@@ -417,11 +444,16 @@ enum TransactionAnalysisService {
         case .tenMonthly:
             let months = activeMonthCount > 0 ? activeMonthCount : 10
             return Int((Double(perOccurrence) * Double(months) / 12.0).rounded())
+        case .custom:
+            guard activeMonthCount > 0 else { return 0 }
+            return Int((Double(perOccurrence) * Double(activeMonthCount) / 12.0).rounded())
         case .quarterly:
             return perOccurrence / 3
+        case .twiceYearly:
+            return perOccurrence / 6
         case .yearly:
             return perOccurrence / 12
-        case .oneOff, .custom:
+        case .oneOff:
             return perOccurrence
         }
     }

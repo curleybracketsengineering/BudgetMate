@@ -152,7 +152,14 @@ enum BudgetGenerationService {
             let monthsFromStart = monthsFrom(startYear: startYear, startMonth: startMonth, toYear: year, toMonth: month)
             guard monthsFromStart >= 0, monthsFromStart % 3 == 0 else { return [] }
             return [anchorDate(inYear: year, month: month, from: rule.startDate)]
-        case .tenMonthly:
+        case .twiceYearly:
+            guard isActiveCalendarMonth(rule: rule, year: year, month: month) else { return [] }
+            let startComponents = Calendar.current.dateComponents([.year, .month], from: rule.startDate)
+            guard let startYear = startComponents.year, let startMonth = startComponents.month else { return [] }
+            let monthsFromStart = monthsFrom(startYear: startYear, startMonth: startMonth, toYear: year, toMonth: month)
+            guard monthsFromStart >= 0, monthsFromStart % 6 == 0 else { return [] }
+            return [anchorDate(inYear: year, month: month, from: rule.startDate)]
+        case .tenMonthly, .custom:
             guard isActiveCalendarMonth(rule: rule, year: year, month: month) else { return [] }
             let activeMonths = parseMonthPattern(rule.monthPatternRaw)
             guard activeMonths.contains(month) else { return [] }
@@ -161,9 +168,6 @@ enum BudgetGenerationService {
             let startComponents = Calendar.current.dateComponents([.year, .month], from: rule.startDate)
             guard startComponents.year == year, startComponents.month == month else { return [] }
             return [rule.startDate]
-        case .custom:
-            guard isActiveCalendarMonth(rule: rule, year: year, month: month) else { return [] }
-            return [anchorDate(inYear: year, month: month, from: rule.startDate)]
         }
     }
 

@@ -11,6 +11,7 @@ struct ImportsView: View {
 
     @State private var showingImporter = false
     @State private var typeFilter: BudgetType?
+    @State private var paymentMethodFilter: ImportPaymentMethodFilter?
     @State private var transactionSearchText = ""
     @State private var showingExcluded = false
     @State private var editingPayeeNote: PayeeNoteEditContext?
@@ -40,6 +41,9 @@ struct ImportsView: View {
         if let typeFilter {
             rows = rows.filter { $0.budgetType == typeFilter }
         }
+        if let paymentMethodFilter {
+            rows = rows.filter { paymentMethodFilter.matches(subcategory: $0.transaction.subcategory) }
+        }
         return rows
     }
 
@@ -47,20 +51,37 @@ struct ImportsView: View {
         !transactionSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var linkedIncomingTransactionIDs: Set<UUID> {
-        importSession.linkedTransactionIDs(for: .incoming)
+    private var linkedFocusTransactionIDs: Set<UUID> {
+        importSession.linkedTransactionIDs(for: importSession.flowFocus)
     }
 
-    private var showsIncomingSelection: Bool {
-        importSession.flowFocus == .incoming
+    private var showsTransactionSelection: Bool {
+        importSession.flowFocus == .incoming || importSession.flowFocus == .outgoing
     }
 
     private var incomingTransactionCount: Int {
-        importSession.rows(matching: .incoming).count
+        filteredRowCount(matching: .incoming)
     }
 
     private var outgoingTransactionCount: Int {
-        importSession.rows(matching: .outgoing).count
+        filteredRowCount(matching: .outgoing)
+    }
+
+    private func filteredRowCount(matching focus: ImportFlowFocus) -> Int {
+        var rows = importSession.rows(matching: focus)
+        if let paymentMethodFilter {
+            rows = rows.filter { paymentMethodFilter.matches(subcategory: $0.transaction.subcategory) }
+        }
+        return rows.count
+    }
+
+    private var availablePaymentMethodFilters: [ImportPaymentMethodFilter] {
+        let present = Set(
+            importSession.previewRows
+                .filter { importSession.flowFocus.includes(budgetType: $0.budgetType) }
+                .map { ImportPaymentMethodFilter.from(subcategory: $0.transaction.subcategory) }
+        )
+        return ImportPaymentMethodFilter.displayOrder.filter { present.contains($0) }
     }
 
     private var totals: MonthTotals {
@@ -171,6 +192,7 @@ struct ImportsView: View {
                 Button {
                     importSession.clear()
                     typeFilter = nil
+                    paymentMethodFilter = nil
                     transactionSearchText = ""
                     selectedTransactionIDs = []
                 } label: {
@@ -239,7 +261,10 @@ struct ImportsView: View {
                         suggestions: Bindable(importSession).budgetSuggestions,
                         flowFocus: Bindable(importSession).flowFocus,
                         amountBasis: Bindable(importSession).amountBasis,
+                        paymentMethodFilter: $paymentMethodFilter,
                         typicalMonth: importSession.typicalMonth,
+                        availablePaymentMethodFilters: availablePaymentMethodFilters,
+                        previewRowsForPaymentFilter: importSession.previewRows,
                         currency: currency,
                         totalIncomingCount: incomingTransactionCount,
                         totalOutgoingCount: outgoingTransactionCount,
@@ -283,6 +308,10 @@ struct ImportsView: View {
                 typeFilter = nil
                 transactionSearchText = ""
                 selectedTransactionIDs = []
+                if let paymentMethodFilter,
+                   !availablePaymentMethodFilters.contains(paymentMethodFilter) {
+                    self.paymentMethodFilter = nil
+                }
             }
 
             Text(flowFocusHelpText)
@@ -292,11 +321,12 @@ struct ImportsView: View {
     }
 
     private var flowFocusHelpText: String {
+        let filterNote = paymentMethodFilter.map { " · \($0.title)" } ?? ""
         switch importSession.flowFocus {
         case .incoming:
-            return "Showing \(incomingTransactionCount) income transaction(s) — recurring suggestions above, all income items in the preview below."
+            return "Showing \(incomingTransactionCount) income transaction(s)\(filterNote) — recurring suggestions above, all matching income items in the preview below."
         case .outgoing:
-            return "Showing \(outgoingTransactionCount) outgoing transaction(s) — bills, direct debits, savings, and other commitments."
+            return "Showing \(outgoingTransactionCount) outgoing transaction(s)\(filterNote) — select items below to group recurring bills & savings above, or import one-offs."
         }
     }
 
@@ -353,12 +383,12 @@ struct ImportsView: View {
                 }
             }
 
-            Text(incomingTransactionsHelpText)
+            Text(transactionsHelpText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if showsIncomingSelection && !selectedTransactionIDs.isEmpty {
-                incomingSelectionBar
+            if showsTransactionSelection && !selectedTransactionIDs.isEmpty {
+                transactionSelectionBar
             }
 
             HStack(spacing: 8) {
@@ -380,15 +410,18 @@ struct ImportsView: View {
             .frame(maxWidth: 320, alignment: .leading)
 
             LazyVStack(spacing: 0) {
-                ImportRowHeader(showsSelection: showsIncomingSelection)
+                ImportRowHeader(showsSelection: showsTransactionSelection)
                 Divider()
                 ForEach(filteredRows) { row in
-                    let isLinked = showsIncomingSelection && linkedIncomingTransactionIDs.contains(row.id)
-                    let isSelectable = showsIncomingSelection && row.budgetType == .income && !isLinked
+                    let isLinked = showsTransactionSelection && linkedFocusTransactionIDs.contains(row.id)
+                    let isSelectable = showsTransactionSelection
+                        && importSession.flowFocus.includes(budgetType: row.budgetType)
+                        && !isLinked
                     ImportTransactionRowView(
                         row: binding(for: row),
                         currency: currency,
                         payeeNoteIndex: payeeNoteIndex,
+                        showsSelection: showsTransactionSelection,
                         isSelectable: isSelectable,
                         isSelected: selectedTransactionIDs.contains(row.id),
                         onToggleSelection: {
@@ -420,26 +453,54 @@ struct ImportsView: View {
         }
     }
 
-    private var incomingTransactionsHelpText: String {
-        if showsIncomingSelection {
+    private var transactionsHelpText: String {
+        switch importSession.flowFocus {
+        case .incoming:
             return "Select income items with the round buttons to group missed recurring payments as monthly income above. You can also import one-off tiles, create a single recurring rule, or exclude items."
+        case .outgoing:
+            return "Select bills, direct debits, or savings items with the round buttons to group missed recurring payments above. You can also import one-off tiles, create a single recurring rule, or exclude items."
         }
-        return "Import individual transactions as one-off tiles in their actual month, create a recurring budget rule, or exclude items you don't want. Recurring groups above become budget rules (summary), not one-off tiles."
     }
 
-    private var incomingSelectionBar: some View {
+    private var selectedRowsBudgetType: BudgetType? {
+        let types = Set(
+            importSession.previewRows
+                .filter { selectedTransactionIDs.contains($0.id) }
+                .map(\.budgetType)
+        )
+        guard types.count == 1, let type = types.first else { return nil }
+        return type
+    }
+
+    private var groupSelectedButtonTitle: String {
+        switch selectedRowsBudgetType {
+        case .income: "Group as monthly income"
+        case .expense: "Group as monthly bill"
+        case .saving: "Group as monthly saving"
+        default: "Group as recurring"
+        }
+    }
+
+    private var transactionSelectionBar: some View {
         HStack(spacing: 12) {
             Text("\(selectedTransactionIDs.count) selected")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
 
             Button {
-                groupSelectedAsMonthlyIncome()
+                groupSelectedTransactions()
             } label: {
-                Label("Group as monthly income", systemImage: "arrow.triangle.2.circlepath")
+                Label(groupSelectedButtonTitle, systemImage: "arrow.triangle.2.circlepath")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
+            .disabled(selectedRowsBudgetType == nil)
+
+            if selectedRowsBudgetType == nil && !selectedTransactionIDs.isEmpty {
+                Text("Select items of the same type")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Button("Clear selection") {
                 selectedTransactionIDs = []
@@ -460,7 +521,7 @@ struct ImportsView: View {
         }
     }
 
-    private func groupSelectedAsMonthlyIncome() {
+    private func groupSelectedTransactions() {
         let rows = importSession.previewRows.filter { selectedTransactionIDs.contains($0.id) }
         guard !rows.isEmpty else {
             selectedTransactionIDs = []
@@ -468,15 +529,25 @@ struct ImportsView: View {
         }
 
         guard let suggestion = importSession.addManualSuggestion(from: rows, cycle: .monthly) else {
-            importSession.parseError = "Could not group selected transactions as monthly income."
+            importSession.parseError = "Could not group selected transactions — select items of the same type (income, bill, or saving)."
             return
         }
 
         selectedTransactionIDs = []
-        importSession.importMessage = "Added \"\(suggestion.name)\" to recurring income above."
+        let sectionLabel = recurringSectionLabel(for: suggestion.budgetType)
+        importSession.importMessage = "Added \"\(suggestion.name)\" to \(sectionLabel) above."
         let suggestionID = suggestion.id
-        presentUndo(message: "Grouped \(suggestion.name) as monthly income") {
+        presentUndo(message: "Grouped \(suggestion.name) as \(sectionLabel)") {
             importSession.removeSuggestion(id: suggestionID)
+        }
+    }
+
+    private func recurringSectionLabel(for budgetType: BudgetType) -> String {
+        switch budgetType {
+        case .income: "recurring income"
+        case .expense: "recurring bills"
+        case .saving: "recurring savings"
+        default: "recurring items"
         }
     }
 
@@ -515,6 +586,7 @@ struct ImportsView: View {
     }
 
     private func syncPayeeNotes() {
+        try? PayeeNoteService.deduplicate(in: modelContext)
         importSession.payeeNotes = payeeNoteIndex
         importSession.refreshAnalysis()
     }
@@ -659,6 +731,7 @@ struct ImportsView: View {
             )
             syncPayeeNotes()
             typeFilter = nil
+            paymentMethodFilter = nil
             transactionSearchText = ""
             showingExcluded = false
             selectedTransactionIDs = []
@@ -819,7 +892,7 @@ private struct PayeeNoteEditContext: Identifiable {
     var id: String { matchKey }
 }
 
-private struct FilterChip: View {
+struct FilterChip: View {
     let title: String
     let isSelected: Bool
     let action: () -> Void
@@ -871,6 +944,7 @@ private struct ImportTransactionRowView: View {
     @Binding var row: ImportPreviewRow
     let currency: AppCurrency
     let payeeNoteIndex: [String: PayeeNote]
+    let showsSelection: Bool
     let isSelectable: Bool
     let isSelected: Bool
     let onToggleSelection: () -> Void
@@ -887,6 +961,16 @@ private struct ImportTransactionRowView: View {
         PayeeNoteService.resolvedPayeeLabels(for: row.transaction.payee, in: payeeNoteIndex)
     }
 
+    private var selectionHelpText: String {
+        if isSelected { return "Deselect" }
+        switch row.budgetType {
+        case .income: return "Select to group as monthly income"
+        case .expense: return "Select to group as monthly bill"
+        case .saving: return "Select to group as monthly saving"
+        default: return "Select to group as recurring"
+        }
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             if isSelectable {
@@ -896,8 +980,8 @@ private struct ImportTransactionRowView: View {
                 }
                 .buttonStyle(.plain)
                 .frame(width: 28)
-                .help(isSelected ? "Deselect" : "Select to group as monthly income")
-            } else if row.budgetType == .income {
+                .help(selectionHelpText)
+            } else if showsSelection {
                 Color.clear
                     .frame(width: 28)
             }

@@ -112,7 +112,8 @@ struct BudgetRuleDetailView: View {
                 linkedAccountId: $linkedAccountId,
                 transferToAccountId: $transferToAccountId,
                 showIndividuallyInPlan: $showIndividuallyInPlan,
-                amountFieldFocused: $amountFieldFocused
+                amountFieldFocused: $amountFieldFocused,
+                onAmountCommit: saveIfReady
             )
 
             if rule.isArchived {
@@ -132,6 +133,11 @@ struct BudgetRuleDetailView: View {
         }
         .formStyle(.grouped)
         .navigationTitle(name.isEmpty ? "Rule" : name)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") { saveIfReady() }
+            }
+        }
         .onAppear { loadFromRule() }
         .onChange(of: rule.id) { loadFromRule() }
     }

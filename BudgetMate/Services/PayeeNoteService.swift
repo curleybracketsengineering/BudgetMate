@@ -3,7 +3,42 @@ import SwiftData
 
 enum PayeeNoteService {
     static func index(_ notes: [PayeeNote]) -> [String: PayeeNote] {
-        Dictionary(uniqueKeysWithValues: notes.map { ($0.matchKey, $0) })
+        notes.keyedByMatchKey()
+    }
+
+    static func deduplicate(in context: ModelContext) throws {
+        let all = try context.fetch(FetchDescriptor<PayeeNote>())
+        let grouped = Dictionary(grouping: all, by: \.matchKey)
+        var changed = false
+
+        for duplicates in grouped.values where duplicates.count > 1 {
+            let keeper = duplicates.dropFirst().reduce(duplicates[0], PayeeNote.preferDuplicate)
+            var groupChanged = false
+            for duplicate in duplicates where duplicate !== keeper {
+                if keeper.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   !duplicate.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    keeper.displayName = duplicate.displayName
+                }
+                if keeper.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   !duplicate.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    keeper.notes = duplicate.notes
+                }
+                if keeper.samplePayee.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   !duplicate.samplePayee.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    keeper.samplePayee = duplicate.samplePayee
+                }
+                context.delete(duplicate)
+                groupChanged = true
+            }
+            if groupChanged {
+                keeper.markUpdated()
+                changed = true
+            }
+        }
+
+        if changed {
+            try context.save()
+        }
     }
 
     static func lookup(payee: String, in notes: [String: PayeeNote]) -> PayeeNote? {
@@ -54,6 +89,8 @@ enum PayeeNoteService {
     ) throws -> PayeeNote {
         let trimmedKey = matchKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedKey.isEmpty else { return PayeeNote() }
+
+        try deduplicate(in: context)
 
         let descriptor = FetchDescriptor<PayeeNote>(
             predicate: #Predicate { $0.matchKey == trimmedKey }

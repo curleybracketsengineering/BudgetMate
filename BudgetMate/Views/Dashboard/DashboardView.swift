@@ -61,6 +61,17 @@ struct DashboardView: View {
             }
         }
         .navigationTitle("Dashboard")
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    printDashboard()
+                } label: {
+                    Label("Print", systemImage: "printer")
+                }
+                .disabled(settings == nil || accounts.isEmpty)
+                .help("Print account balances and forecast")
+            }
+        }
         .onAppear {
             if selectedAccountId == nil, accounts.count == 1 {
                 selectedAccountId = accounts.first?.id
@@ -191,6 +202,61 @@ struct DashboardView: View {
         )
         .first(where: { $0.accountId == account.id })?
         .closingBalanceMinorUnits ?? account.startingBalanceMinorUnits
+    }
+
+    private func printDashboard() {
+        guard let settings, let currentMonth else { return }
+
+        let printableAccounts = accounts.map { account in
+            let balance = accountBalance(for: account, month: currentMonth, settings: settings)
+            let level = account.isPrimary
+                ? CashFlowService.thresholdLevel(balance: balance, settings: settings)
+                : nil
+            return PrintableAccountBalance(
+                id: account.id,
+                name: account.name,
+                balance: balance,
+                isPrimary: account.isPrimary,
+                thresholdLabel: thresholdLabel(for: level)
+            )
+        }
+
+        let lastMonth = orderedMonths.last
+        let endLabel = lastMonth?.displayTitle
+        let endBalance = lastMonth?.closingBalanceMinorUnits
+
+        let accountNameMap = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.name) })
+        let forecastByMonth = Dictionary(grouping: forecastPoints, by: \.monthKey)
+        let sortedMonthKeys = forecastByMonth.keys.sorted()
+        let printableForecast = sortedMonthKeys.compactMap { key -> PrintableForecastMonth? in
+            guard let points = forecastByMonth[key], let first = points.first else { return nil }
+            let balances = Dictionary(uniqueKeysWithValues: points.map { ($0.accountId, $0.closingBalanceMinorUnits) })
+            return PrintableForecastMonth(
+                id: key,
+                label: first.monthLabel,
+                balancesByAccount: balances
+            )
+        }
+
+        PrintService.print(title: "Dashboard") {
+            DashboardPrintView(
+                currency: currency,
+                accounts: printableAccounts,
+                endOfPlanLabel: endLabel,
+                endOfPlanBalance: endBalance,
+                forecastMonths: printableForecast,
+                accountNames: accountNameMap
+            )
+        }
+    }
+
+    private func thresholdLabel(for level: BalanceThresholdLevel?) -> String? {
+        guard let level else { return nil }
+        switch level {
+        case .safe: return "Safe"
+        case .warning: return "Warning"
+        case .critical: return "Critical"
+        }
     }
 }
 

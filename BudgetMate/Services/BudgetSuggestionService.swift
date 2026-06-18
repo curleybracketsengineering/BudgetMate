@@ -40,6 +40,7 @@ enum BudgetSuggestionService {
         )
         rule.isActive = true
         rule.monthlyEquivalentMinorUnits = BudgetRuleService.calculatedMonthlyEquivalent(for: rule)
+        try BudgetRuleService.assignDisplayOrderForNewRule(rule, in: context)
         rule.markCreated()
         context.insert(rule)
 
@@ -82,6 +83,7 @@ enum BudgetSuggestionService {
             rule.assumptionsNotes = combinedAssumptionsNotes(for: suggestion)
             rule.isActive = true
             rule.monthlyEquivalentMinorUnits = BudgetRuleService.calculatedMonthlyEquivalent(for: rule)
+            try BudgetRuleService.assignDisplayOrderForNewRule(rule, in: context)
             rule.markCreated()
             context.insert(rule)
         }

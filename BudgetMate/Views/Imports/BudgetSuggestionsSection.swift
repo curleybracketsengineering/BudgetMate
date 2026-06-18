@@ -4,7 +4,10 @@ struct BudgetSuggestionsSection: View {
     @Binding var suggestions: [BudgetSuggestion]
     @Binding var flowFocus: ImportFlowFocus
     @Binding var amountBasis: AmountBasis
+    @Binding var paymentMethodFilter: ImportPaymentMethodFilter?
     let typicalMonth: TypicalMonthSummary
+    let availablePaymentMethodFilters: [ImportPaymentMethodFilter]
+    let previewRowsForPaymentFilter: [ImportPreviewRow]
     let currency: AppCurrency
     let totalIncomingCount: Int
     let totalOutgoingCount: Int
@@ -22,11 +25,39 @@ struct BudgetSuggestionsSection: View {
     }
 
     private var incomingSuggestions: [BudgetSuggestion] {
-        suggestions.filter { $0.budgetType == .income && !$0.isIgnored }
+        suggestions.filter {
+            $0.budgetType == .income && !$0.isIgnored && matchesPaymentMethodFilter($0)
+        }
     }
 
     private var outgoingSuggestions: [BudgetSuggestion] {
-        suggestions.filter { ($0.budgetType == .expense || $0.budgetType == .saving) && !$0.isIgnored }
+        suggestions.filter {
+            ($0.budgetType == .expense || $0.budgetType == .saving)
+                && !$0.isIgnored
+                && matchesPaymentMethodFilter($0)
+        }
+    }
+
+    private var displayedTypicalMonth: TypicalMonthSummary {
+        guard let paymentMethodFilter else { return typicalMonth }
+        let scopedSuggestions = suggestions.filter {
+            !$0.isIgnored
+                && flowFocus.includes(budgetType: $0.budgetType)
+                && paymentMethodFilter.matches(paymentMethod: $0.paymentMethod)
+        }
+        let scopedRows = previewRows.filter {
+            flowFocus.includes(budgetType: $0.budgetType)
+                && paymentMethodFilter.matches(subcategory: $0.transaction.subcategory)
+        }
+        return TransactionAnalysisService.typicalMonth(
+            suggestions: scopedSuggestions,
+            previewRows: scopedRows
+        )
+    }
+
+    private func matchesPaymentMethodFilter(_ suggestion: BudgetSuggestion) -> Bool {
+        guard let paymentMethodFilter else { return true }
+        return paymentMethodFilter.matches(paymentMethod: suggestion.paymentMethod)
     }
 
     var body: some View {
@@ -123,7 +154,11 @@ struct BudgetSuggestionsSection: View {
         transactionCount: Int
     ) -> String {
         let linked = suggestions
-            .filter { focus.includes(budgetType: $0.budgetType) && !$0.isIgnored }
+            .filter {
+                focus.includes(budgetType: $0.budgetType)
+                    && !$0.isIgnored
+                    && matchesPaymentMethodFilter($0)
+            }
             .reduce(0) { $0 + $1.transactionCount }
         let other = max(0, transactionCount - linked)
         if other > 0 {
@@ -195,31 +230,67 @@ struct BudgetSuggestionsSection: View {
         .help("Review your selection before saving rules to Budget Rules")
     }
 
-    private var typicalMonthSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Typical month (from \(typicalMonth.analysisMonthCount) months of data)")
+    private var typicalMonthSectionTitle: String {
+        "Typical month (from \(displayedTypicalMonth.analysisMonthCount) months of data)"
+    }
+
+    private var paymentMethodFilterSection: some View {
+        HStack(spacing: 8) {
+            Text("Payment type")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
+            FilterChip(title: "All", isSelected: paymentMethodFilter == nil) {
+                paymentMethodFilter = nil
+            }
+            ForEach(availablePaymentMethodFilters) { method in
+                let count = previewRowsForPaymentFilter.filter {
+                    flowFocus.includes(budgetType: $0.budgetType)
+                        && method.matches(subcategory: $0.transaction.subcategory)
+                }.count
+                if count > 0 {
+                    FilterChip(
+                        title: "\(method.title) (\(count))",
+                        isSelected: paymentMethodFilter == method
+                    ) {
+                        paymentMethodFilter = method
+                    }
+                }
+            }
+        }
+    }
+
+    private var typicalMonthSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(typicalMonthSectionTitle)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if availablePaymentMethodFilters.count > 1 {
+                HStack {
+                    Spacer(minLength: 0)
+                    paymentMethodFilterSection
+                }
+            }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 130))], spacing: 10) {
                 SummaryCard(
                     title: "Income / month",
-                    amount: MoneyFormatter.format(minorUnits: typicalMonth.incomeMinorUnits, currency: currency),
+                    amount: MoneyFormatter.format(minorUnits: displayedTypicalMonth.incomeMinorUnits, currency: currency),
                     tint: .green
                 )
                 SummaryCard(
                     title: "Bills / month",
-                    amount: MoneyFormatter.format(minorUnits: typicalMonth.expenseMinorUnits, currency: currency),
+                    amount: MoneyFormatter.format(minorUnits: displayedTypicalMonth.expenseMinorUnits, currency: currency),
                     tint: .red
                 )
                 SummaryCard(
                     title: "Savings / month",
-                    amount: MoneyFormatter.format(minorUnits: typicalMonth.savingMinorUnits, currency: currency)
+                    amount: MoneyFormatter.format(minorUnits: displayedTypicalMonth.savingMinorUnits, currency: currency)
                 )
-                if typicalMonth.flexibleSpendingMinorUnits > 0 {
+                if displayedTypicalMonth.flexibleSpendingMinorUnits > 0 {
                     SummaryCard(
                         title: "Flexible spend",
-                        amount: MoneyFormatter.format(minorUnits: typicalMonth.flexibleSpendingMinorUnits, currency: currency)
+                        amount: MoneyFormatter.format(minorUnits: displayedTypicalMonth.flexibleSpendingMinorUnits, currency: currency)
                     )
                 }
             }

@@ -22,6 +22,7 @@ struct BudgetRuleEditorFields: View {
     @Binding var showIndividuallyInPlan: Bool
 
     var amountFieldFocused: FocusState<Bool>.Binding?
+    var onAmountCommit: (() -> Void)?
 
     var body: some View {
         Section("Rule") {
@@ -29,6 +30,7 @@ struct BudgetRuleEditorFields: View {
             if let amountFieldFocused {
                 TextField("Amount", text: $amountText)
                     .focused(amountFieldFocused)
+                    .onSubmit { onAmountCommit?() }
             } else {
                 TextField("Amount", text: $amountText)
             }
@@ -53,11 +55,15 @@ struct BudgetRuleEditorFields: View {
             }
         }
 
-        if cycle == .tenMonthly {
+        if cycle == .tenMonthly || cycle == .custom {
             Section("Active months") {
-                Text("Select the months this payment occurs (typically 10 per year).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(
+                    cycle == .tenMonthly
+                        ? "Select the months this payment occurs (typically 10 per year)."
+                        : "Select which months this payment occurs."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 MonthPatternPicker(selectedMonths: $selectedMonths)
             }
         }
@@ -353,7 +359,7 @@ enum BudgetRuleEditor {
         snapshot: inout LoadedSnapshot
     ) -> LoadedSnapshot {
         let amount = MoneyFormatter.parseMajorUnits(amountText, currency: currency) ?? 0
-        let monthPatternRaw = cycle == .tenMonthly
+        let monthPatternRaw = (cycle == .tenMonthly || cycle == .custom)
             ? BudgetRuleService.formatMonthPattern(selectedMonths)
             : ""
 

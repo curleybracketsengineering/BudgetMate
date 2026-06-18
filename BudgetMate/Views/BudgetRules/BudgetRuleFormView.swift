@@ -140,6 +140,9 @@ struct BudgetRuleFormView: View {
         )
 
         do {
+            if existingRule == nil {
+                try BudgetRuleService.assignDisplayOrderForNewRule(rule, in: modelContext)
+            }
             try modelContext.save()
             _ = try AppDataService.generateAndRefresh(in: modelContext)
             dismiss()

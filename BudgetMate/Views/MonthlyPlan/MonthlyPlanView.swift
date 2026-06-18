@@ -8,6 +8,7 @@ struct MonthlyPlanView: View {
     @Query(sort: [SortDescriptor(\BudgetMonth.year), SortDescriptor(\BudgetMonth.month)]) private var allMonths: [BudgetMonth]
     @Query private var allTiles: [BudgetTile]
     @Query private var rules: [BudgetRule]
+    @Query(sort: \BankAccount.displayOrder) private var accounts: [BankAccount]
 
     @Binding var selectedMonth: BudgetMonth?
 
@@ -45,6 +46,12 @@ struct MonthlyPlanView: View {
                             ForEach(orderedMonths, id: \.id) { month in
                                 let tiles = CashFlowService.tilesForMonth(year: month.year, month: month.month, from: allTiles)
                                 let totals = CashFlowService.totals(for: tiles)
+                                let accountBalances = CashFlowService.accountBalances(
+                                    for: month,
+                                    accounts: accounts,
+                                    tiles: allTiles,
+                                    settings: settings
+                                )
                                 Button {
                                     selectedMonth = month
                                 } label: {
@@ -53,6 +60,8 @@ struct MonthlyPlanView: View {
                                         settings: settings,
                                         income: totals.income,
                                         expense: totals.expense,
+                                        accounts: accounts,
+                                        accountBalances: accountBalances,
                                         isSelected: selectedMonth?.id == month.id
                                     )
                                 }
@@ -71,8 +80,32 @@ struct MonthlyPlanView: View {
         .navigationTitle("Monthly Plan")
         .onAppear { ensureData() }
         .toolbar {
-            if let settings, featureGate.canExtendHorizon(currentMonths: settings.horizonMonths) {
-                ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup {
+                Menu {
+                    Button {
+                        printMonthlyPlan()
+                    } label: {
+                        Label("Print…", systemImage: "printer")
+                    }
+
+                    Button {
+                        exportMonthlyPlanPDF()
+                    } label: {
+                        Label("Save as PDF…", systemImage: "doc.richtext")
+                    }
+
+                    Button {
+                        exportMonthlyPlanCSV()
+                    } label: {
+                        Label("Save as CSV…", systemImage: "tablecells")
+                    }
+                } label: {
+                    Label("Export", systemImage: "printer")
+                }
+                .disabled(orderedMonths.isEmpty)
+                .help("Print or export the monthly plan")
+
+                if let settings, featureGate.canExtendHorizon(currentMonths: settings.horizonMonths) {
                     Button {
                         extendPlan(byYears: 1, settings: settings)
                     } label: {
@@ -159,5 +192,49 @@ struct MonthlyPlanView: View {
         } catch {
             print("Monthly plan refresh failed: \(error)")
         }
+    }
+
+    private var printableMonthRows: [PrintableMonthRow] {
+        orderedMonths.map { month in
+            let tiles = CashFlowService.tilesForMonth(year: month.year, month: month.month, from: allTiles)
+            let totals = CashFlowService.totals(for: tiles)
+            return PrintableMonthRow(
+                id: month.id,
+                title: month.displayTitle,
+                opening: month.openingBalanceMinorUnits,
+                income: totals.income,
+                expense: totals.expense,
+                closing: month.closingBalanceMinorUnits,
+                isLocked: month.isLocked
+            )
+        }
+    }
+
+    private func monthlyPlanPrintView(for settings: AppSettings) -> MonthlyPlanPrintView {
+        MonthlyPlanPrintView(
+            currency: settings.currency,
+            months: printableMonthRows,
+            horizonLabel: PlanningHorizon.label(forMonths: settings.horizonMonths)
+        )
+    }
+
+    private func printMonthlyPlan() {
+        guard let settings else { return }
+        PrintService.print(title: "Monthly Plan") {
+            monthlyPlanPrintView(for: settings)
+        }
+    }
+
+    private func exportMonthlyPlanPDF() {
+        guard let settings else { return }
+        PrintService.exportPDF(title: "Monthly Plan") {
+            monthlyPlanPrintView(for: settings)
+        }
+    }
+
+    private func exportMonthlyPlanCSV() {
+        guard let settings else { return }
+        let data = ExportService.csvData(rows: printableMonthRows, currency: settings.currency)
+        ExportService.saveCSV(data: data, suggestedFilename: "Monthly Plan.csv")
     }
 }

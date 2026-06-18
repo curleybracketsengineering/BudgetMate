@@ -92,26 +92,37 @@ enum PlanTileGroupingService {
 
         var sections: [PlanTileDisplaySection] = PlanTileGroup.allCases.compactMap { group in
             guard let groupTiles = grouped[group], !groupTiles.isEmpty else { return nil }
-            let total = groupTiles.reduce(0) { $0 + $1.amountMinorUnits }
+            let sortedTiles = sortTiles(groupTiles, rulesById: rulesById)
+            let total = sortedTiles.reduce(0) { $0 + $1.amountMinorUnits }
             return PlanTileDisplaySection(
                 kind: .grouped(group),
                 title: group.displayName,
-                tiles: groupTiles.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending },
+                tiles: sortedTiles,
                 totalMinorUnits: total
             )
         }
 
         if !individual.isEmpty {
+            let sortedIndividual = sortTiles(individual, rulesById: rulesById)
             sections.append(
                 PlanTileDisplaySection(
                     kind: .individual,
                     title: "Individual items",
-                    tiles: individual.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending },
-                    totalMinorUnits: individual.reduce(0) { $0 + $1.amountMinorUnits }
+                    tiles: sortedIndividual,
+                    totalMinorUnits: sortedIndividual.reduce(0) { $0 + $1.amountMinorUnits }
                 )
             )
         }
 
         return sections
+    }
+
+    private static func sortTiles(_ tiles: [BudgetTile], rulesById: [UUID: BudgetRule]) -> [BudgetTile] {
+        tiles.sorted { lhs, rhs in
+            let lhsOrder = lhs.linkedRuleId.flatMap { rulesById[$0]?.displayOrder } ?? Int.max
+            let rhsOrder = rhs.linkedRuleId.flatMap { rulesById[$0]?.displayOrder } ?? Int.max
+            if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
     }
 }
