@@ -7,7 +7,7 @@ struct BudgetRuleEditorFields: View {
     @Binding var name: String
     @Binding var amountText: String
     @Binding var type: BudgetType
-    @Binding var category: String
+    @Binding var subCategory: BudgetRuleSubCategory?
     @Binding var cycle: BudgetCycleType
     @Binding var startDate: Date
     @Binding var hasEndDate: Bool
@@ -39,7 +39,12 @@ struct BudgetRuleEditorFields: View {
                     Text(t.displayName).tag(t)
                 }
             }
-            TextField("Category", text: $category)
+            if let orderGroup = BudgetRuleService.OrderGroup.forPicker(from: type) {
+                BudgetRuleSubCategoryPicker(
+                    selectedSubCategory: $subCategory,
+                    orderGroup: orderGroup
+                )
+            }
             if type == .transfer {
                 TransferAccountFields(
                     fromAccountId: $linkedAccountId,
@@ -295,7 +300,7 @@ enum BudgetRuleEditor {
         name: String,
         amountText: String,
         type: BudgetType,
-        category: String,
+        subCategory: BudgetRuleSubCategory?,
         cycle: BudgetCycleType,
         startDate: Date,
         hasEndDate: Bool,
@@ -314,7 +319,7 @@ enum BudgetRuleEditor {
             rule.name,
             MoneyFormatter.majorUnitsString(minorUnits: rule.amountMinorUnits, currency: currency),
             rule.type,
-            rule.category,
+            rule.subCategory,
             rule.cycle,
             rule.startDate,
             rule.endDate != nil,
@@ -343,7 +348,7 @@ enum BudgetRuleEditor {
         name: String,
         amountText: String,
         type: BudgetType,
-        category: String,
+        subCategory: BudgetRuleSubCategory?,
         cycle: BudgetCycleType,
         startDate: Date,
         hasEndDate: Bool,
@@ -366,7 +371,15 @@ enum BudgetRuleEditor {
         rule.name = name
         rule.amountMinorUnits = amount
         rule.type = type
-        rule.category = category
+        if BudgetRuleService.OrderGroup.forPicker(from: type) != nil {
+            if let subCategory, subCategory.orderGroup == BudgetRuleService.OrderGroup.forType(type) {
+                rule.subCategory = subCategory
+            } else {
+                rule.subCategory = nil
+            }
+        } else {
+            rule.subCategory = nil
+        }
         rule.cycle = cycle
         rule.startDate = startDate
         rule.endDate = hasEndDate ? endDate : nil

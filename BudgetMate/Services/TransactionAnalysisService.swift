@@ -10,11 +10,7 @@ enum TransactionAnalysisService {
     ) -> (suggestions: [BudgetSuggestion], typicalMonth: TypicalMonthSummary) {
         let eligible = rows.filter { $0.budgetType != .transfer }
         let analysisMonthCount = calendarMonthsSpanned(by: eligible)
-        let byMerchant = Dictionary(grouping: eligible) { row in
-            let merchant = PayeeNormalization.merchantKey(row.transaction.payee)
-            let detail = PayeeNormalization.normalize(row.transaction.payee)
-            return "\(merchant)|\(detail)"
-        }
+        let byMerchant = Dictionary(grouping: eligible, by: payeeGroupKey(for:))
 
         var suggestions: [BudgetSuggestion] = []
         var linkedIDs = Set<UUID>()
@@ -49,6 +45,12 @@ enum TransactionAnalysisService {
         )
 
         return (suggestions, typicalMonth)
+    }
+
+    static func payeeGroupKey(for row: ImportPreviewRow) -> String {
+        let merchant = PayeeNormalization.merchantKey(row.transaction.payee)
+        let detail = PayeeNormalization.normalize(row.transaction.payee)
+        return "\(merchant)|\(detail)"
     }
 
     /// Builds a recurring suggestion from user-selected transactions (e.g. missed by auto-grouping).
@@ -88,7 +90,7 @@ enum TransactionAnalysisService {
         var suggestion = BudgetSuggestion(
             name: PayeeNormalization.displayName(from: payeeSample),
             budgetType: budgetType,
-            category: representative.category,
+            suggestedSubCategoryTitle: representative.suggestedSubCategoryTitle,
             cycle: cycle,
             amountMinorUnits: perOccurrence,
             monthlyEquivalentMinorUnits: monthlyEquivalent,
@@ -226,7 +228,7 @@ enum TransactionAnalysisService {
         var suggestion = BudgetSuggestion(
             name: name,
             budgetType: representative.budgetType,
-            category: representative.category,
+            suggestedSubCategoryTitle: representative.suggestedSubCategoryTitle,
             cycle: cycle,
             amountMinorUnits: perOccurrence,
             monthlyEquivalentMinorUnits: monthlyEquivalent,

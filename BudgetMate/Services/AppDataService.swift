@@ -2,12 +2,39 @@ import Foundation
 import SwiftData
 
 enum AppDataService {
+    /// Wipes all budget data from the active store, the alternate on-disk store, and local iCloud cache files.
+    static func wipeAllPersistedData(in context: ModelContext) throws {
+        try clearAllEntities(in: context)
+
+        let active = ModelContainerFactory.activeConfiguration
+        let alternate = active.alternate
+        if let alternateContainer = ModelContainerFactory.makeContainer(configuration: alternate) {
+            let alternateContext = ModelContext(alternateContainer)
+            alternateContext.autosaveEnabled = false
+            try clearAllEntities(in: alternateContext)
+            try alternateContext.save()
+        }
+
+        try context.save()
+        PersistedStoreService.purgeInactiveStoreFiles(keeping: active)
+        PersistedStoreService.scheduleFullStorePurgeOnNextLaunch()
+        PersistedStoreService.resetAuxiliaryPreferences()
+    }
+
     static func clearAllData(in context: ModelContext) throws {
+        try clearAllEntities(in: context)
+        try context.save()
+    }
+
+    private static func clearAllEntities(in context: ModelContext) throws {
         for tile in try context.fetch(FetchDescriptor<BudgetTile>()) {
             context.delete(tile)
         }
         for rule in try context.fetch(FetchDescriptor<BudgetRule>()) {
             context.delete(rule)
+        }
+        for subCategory in try context.fetch(FetchDescriptor<BudgetRuleSubCategory>()) {
+            context.delete(subCategory)
         }
         for month in try context.fetch(FetchDescriptor<BudgetMonth>()) {
             context.delete(month)
@@ -18,10 +45,15 @@ enum AppDataService {
         for note in try context.fetch(FetchDescriptor<PayeeNote>()) {
             context.delete(note)
         }
+        for activity in try context.fetch(FetchDescriptor<HolidayActivity>()) {
+            context.delete(activity)
+        }
+        for holiday in try context.fetch(FetchDescriptor<Holiday>()) {
+            context.delete(holiday)
+        }
         for settings in try context.fetch(FetchDescriptor<AppSettings>()) {
             context.delete(settings)
         }
-        try context.save()
     }
 
     static func ensureSettings(in context: ModelContext) throws -> AppSettings {
@@ -58,23 +90,42 @@ enum AppDataService {
             context.insert(month)
         }
 
-        try trimMonthsBeyondHorizon(settings: settings, in: context)
+        try pruneStalePlanData(settings: settings, in: context)
         try context.save()
 
         return try fetchMonths(settings: settings, in: context)
     }
 
-    static func trimMonthsBeyondHorizon(settings: AppSettings, in context: ModelContext) throws {
+    static func planningHorizonKeys(for settings: AppSettings) -> Set<String> {
         let sequence = PlanningCalendar.monthSequence(
             startYear: settings.planningStartYear,
             startMonth: settings.planningStartMonth,
             count: settings.horizonMonths
         )
-        let validKeys = Set(sequence.map { "\($0.year)-\($0.month)" })
+        return Set(sequence.map { "\($0.year)-\($0.month)" })
+    }
+
+    /// Removes months and tiles that fall outside the current planning horizon.
+    /// Out-of-horizon data is stale after the planning start or length changes.
+    static func pruneStalePlanData(settings: AppSettings, in context: ModelContext) throws {
+        let validKeys = planningHorizonKeys(for: settings)
+
         let allMonths = try context.fetch(FetchDescriptor<BudgetMonth>())
-        for month in allMonths where !validKeys.contains(month.monthKey) && !month.isLocked {
+        for month in allMonths where !validKeys.contains(month.monthKey) {
             context.delete(month)
         }
+
+        let allTiles = try context.fetch(FetchDescriptor<BudgetTile>())
+        for tile in allTiles where !validKeys.contains(tile.monthKey) {
+            context.delete(tile)
+        }
+    }
+
+    /// Rebuilds the plan from the current anchor month: prunes stale data, resyncs recurring tiles, and recalculates balances.
+    static func reanchorPlan(settings: AppSettings, in context: ModelContext) throws {
+        try pruneStalePlanData(settings: settings, in: context)
+        _ = try ensureMonths(settings: settings, in: context)
+        _ = try generateAndRefresh(in: context)
     }
 
     static func fetchMonths(settings: AppSettings, in context: ModelContext) throws -> [BudgetMonth] {
@@ -154,6 +205,7 @@ enum AppDataService {
         try deduplicateRules(in: context)
         let settings = try ensureSettings(in: context)
         _ = try BankAccountService.ensurePrimaryAccount(settings: settings, in: context)
+        try pruneStalePlanData(settings: settings, in: context)
         let accounts = try fetchAllAccounts(in: context)
         let months = try ensureMonths(settings: settings, in: context)
         let tiles = try fetchAllTiles(in: context)

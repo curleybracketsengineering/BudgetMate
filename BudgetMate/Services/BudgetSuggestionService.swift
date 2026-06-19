@@ -25,7 +25,7 @@ enum BudgetSuggestionService {
         let rule = BudgetRule()
         rule.name = name
         rule.type = row.budgetType
-        rule.category = row.category
+        BudgetRuleSubCategoryService.assignSubCategory(to: rule, title: row.suggestedSubCategoryTitle, in: context)
         rule.amountMinorUnits = transaction.amountMinorUnits
         rule.cycle = cycle
         rule.startDate = transaction.date
@@ -63,6 +63,23 @@ enum BudgetSuggestionService {
     }
 
     static func createRules(
+        from rows: [ImportPreviewRow],
+        payeeNotes: [String: PayeeNote],
+        in context: ModelContext
+    ) throws -> [CreatedRuleResult] {
+        let eligible = rows.filter {
+            $0.budgetType == .income || $0.budgetType == .expense || $0.budgetType == .saving
+        }
+        let byPayee = Dictionary(grouping: eligible) { PayeeNormalization.matchKey($0.transaction.payee) }
+        var results: [CreatedRuleResult] = []
+        for (_, payeeRows) in byPayee {
+            guard let row = payeeRows.max(by: { $0.transaction.date < $1.transaction.date }) else { continue }
+            results.append(try createRule(from: row, payeeNotes: payeeNotes, in: context))
+        }
+        return results
+    }
+
+    static func createRules(
         from suggestions: [BudgetSuggestion],
         in context: ModelContext
     ) throws -> Int {
@@ -73,7 +90,11 @@ enum BudgetSuggestionService {
             let rule = BudgetRule()
             rule.name = suggestion.name
             rule.type = suggestion.budgetType
-            rule.category = suggestion.category
+            BudgetRuleSubCategoryService.assignSubCategory(
+                to: rule,
+                title: suggestion.suggestedSubCategoryTitle,
+                in: context
+            )
             rule.amountMinorUnits = suggestion.amountMinorUnits
             rule.cycle = suggestion.cycle
             rule.startDate = suggestion.startDate
@@ -113,7 +134,7 @@ enum BudgetSuggestionService {
 
     private static func commitment(for row: ImportPreviewRow) -> CommitmentType {
         switch row.budgetType {
-        case .expense where row.category == "Spending":
+        case .expense where row.suggestedSubCategoryTitle == "Spending":
             return .flexible
         default:
             return .known

@@ -99,6 +99,7 @@ struct BankAccountFormView: View {
         }
 
         let startingBalance = MoneyFormatter.parseMajorUnits(startingBalanceText, currency: currency) ?? 0
+        let priorStartingBalance = account.startingBalanceMinorUnits
         account.startingBalanceMinorUnits = startingBalance
         account.markUpdated()
 
@@ -108,7 +109,11 @@ struct BankAccountFormView: View {
         }
 
         do {
-            try AppDataService.refreshForecast(in: modelContext)
+            if isPrimary, startingBalance != priorStartingBalance, let settings = settingsList.first {
+                try AppDataService.reanchorPlan(settings: settings, in: modelContext)
+            } else {
+                try AppDataService.refreshForecast(in: modelContext)
+            }
             dismiss()
         } catch {
             print("Account save failed: \(error)")

@@ -466,8 +466,8 @@ private struct BudgetSuggestionRowView: View {
                             .lineLimit(1)
                     }
                     HStack(spacing: 6) {
-                        if !suggestion.category.isEmpty {
-                            Text(suggestion.category)
+                        if !suggestion.suggestedSubCategoryTitle.isEmpty {
+                            Text(suggestion.suggestedSubCategoryTitle)
                                 .font(.caption2)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)

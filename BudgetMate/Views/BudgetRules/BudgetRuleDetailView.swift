@@ -14,7 +14,7 @@ struct BudgetRuleDetailView: View {
     @State private var name = ""
     @State private var amountText = ""
     @State private var type: BudgetType = .expense
-    @State private var category = ""
+    @State private var subCategory: BudgetRuleSubCategory?
     @State private var cycle: BudgetCycleType = .monthly
     @State private var startDate = Date.now
     @State private var hasEndDate = false
@@ -99,7 +99,7 @@ struct BudgetRuleDetailView: View {
                 name: $name,
                 amountText: $amountText,
                 type: $type,
-                category: $category,
+                subCategory: $subCategory,
                 cycle: $cycle,
                 startDate: $startDate,
                 hasEndDate: $hasEndDate,
@@ -164,7 +164,7 @@ struct BudgetRuleDetailView: View {
             transferToAccountId: $transferToAccountId,
             showIndividuallyInPlan: $showIndividuallyInPlan,
             name: $name,
-            category: $category,
+            subCategory: $subCategory,
             assumptionsNotes: $assumptionsNotes,
             amountFieldFocused: $amountFieldFocused,
             onSave: saveIfReady,
@@ -202,7 +202,7 @@ struct BudgetRuleDetailView: View {
         name = loaded.name
         amountText = loaded.amountText
         type = loaded.type
-        category = loaded.category
+        subCategory = loaded.subCategory
         cycle = loaded.cycle
         startDate = loaded.startDate
         hasEndDate = loaded.hasEndDate
@@ -227,7 +227,7 @@ struct BudgetRuleDetailView: View {
             name: name,
             amountText: amountText,
             type: type,
-            category: category,
+            subCategory: subCategory,
             cycle: cycle,
             startDate: startDate,
             hasEndDate: hasEndDate,
@@ -291,7 +291,7 @@ private struct BudgetRuleDetailAutoSaveModifier: ViewModifier {
     @Binding var transferToAccountId: UUID?
     @Binding var showIndividuallyInPlan: Bool
     @Binding var name: String
-    @Binding var category: String
+    @Binding var subCategory: BudgetRuleSubCategory?
     @Binding var assumptionsNotes: String
     var amountFieldFocused: FocusState<Bool>.Binding
 
@@ -303,6 +303,11 @@ private struct BudgetRuleDetailAutoSaveModifier: ViewModifier {
             .onChange(of: type) { _, newType in
                 if newType != .transfer {
                     onClearTransferAccount()
+                }
+                if BudgetRuleService.OrderGroup.forPicker(from: newType) == nil {
+                    subCategory = nil
+                } else if let subCategory, subCategory.orderGroup != BudgetRuleService.OrderGroup.forType(newType) {
+                    self.subCategory = nil
                 }
                 onSave()
             }
@@ -318,7 +323,7 @@ private struct BudgetRuleDetailAutoSaveModifier: ViewModifier {
             .onChange(of: transferToAccountId) { onSave() }
             .onChange(of: showIndividuallyInPlan) { onSave() }
             .onChange(of: name) { onSave() }
-            .onChange(of: category) { onSave() }
+            .onChange(of: subCategory) { onSave() }
             .onChange(of: assumptionsNotes) { onSave() }
             .onChange(of: amountFieldFocused.wrappedValue) { previous, _ in
                 if previous == true {

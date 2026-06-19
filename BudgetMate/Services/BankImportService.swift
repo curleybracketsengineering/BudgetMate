@@ -20,7 +20,7 @@ enum BankImportService {
         var monthsAffected = Set<String>()
         var tileIDs: [UUID] = []
         for row in rows {
-            let tile = makeTile(from: row, accounts: accounts)
+            let tile = makeTile(from: row, accounts: accounts, in: context)
             context.insert(tile)
             created += 1
             monthsAffected.insert(tile.monthKey)
@@ -42,7 +42,7 @@ enum BankImportService {
         try AppDataService.refreshForecast(in: context)
     }
 
-    static func makeTile(from row: ImportPreviewRow, accounts: [BankAccount]) -> BudgetTile {
+    static func makeTile(from row: ImportPreviewRow, accounts: [BankAccount], in context: ModelContext) -> BudgetTile {
         let transaction = row.transaction
         let tile = BudgetTile(
             year: transaction.year,
@@ -51,7 +51,7 @@ enum BankImportService {
         )
         tile.amountMinorUnits = transaction.amountMinorUnits
         tile.type = row.budgetType
-        tile.category = row.category
+        BudgetRuleSubCategoryService.assignSubCategory(to: tile, title: row.suggestedSubCategoryTitle, in: context)
         tile.source = .imported
         tile.status = .active
         tile.confidence = .estimated
@@ -67,7 +67,7 @@ enum BankImportService {
 
     private static func commitment(for row: ImportPreviewRow) -> CommitmentType {
         switch row.budgetType {
-        case .expense where row.category == "Spending":
+        case .expense where row.suggestedSubCategoryTitle == "Spending":
             return .flexible
         default:
             return .known

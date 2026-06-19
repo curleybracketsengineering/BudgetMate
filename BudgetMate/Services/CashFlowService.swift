@@ -77,16 +77,6 @@ enum CashFlowService {
             let key = "\(slot.year)-\(slot.month)"
             guard let month = monthsByKey[key] else { continue }
 
-            if month.isLocked {
-                previousClosingsByAccount = lockedMonthClosings(
-                    accounts: accounts,
-                    monthTiles: tilesByKey[key] ?? [],
-                    openingByAccount: previousClosingsByAccount,
-                    accountsList: accounts
-                )
-                continue
-            }
-
             let monthTiles = tilesByKey[key] ?? []
             var aggregateOpening = 0
             var aggregateClosing = 0
@@ -247,25 +237,6 @@ enum CashFlowService {
     private static func syncPrimaryStartingBalance(settings: AppSettings, accounts: [BankAccount]) {
         guard let primary = BankAccountService.primaryAccount(from: accounts) else { return }
         settings.startingBalanceMinorUnits = primary.startingBalanceMinorUnits
-    }
-
-    private static func lockedMonthClosings(
-        accounts: [BankAccount],
-        monthTiles: [BudgetTile],
-        openingByAccount: [UUID: Int],
-        accountsList: [BankAccount]
-    ) -> [UUID: Int] {
-        var result = openingByAccount
-        for account in accounts {
-            let opening = openingByAccount[account.id] ?? account.startingBalanceMinorUnits
-            result[account.id] = closingBalance(
-                for: account.id,
-                opening: opening,
-                monthTiles: monthTiles,
-                accounts: accountsList
-            )
-        }
-        return result
     }
 
     private static func monthLabel(year: Int, month: Int) -> String {

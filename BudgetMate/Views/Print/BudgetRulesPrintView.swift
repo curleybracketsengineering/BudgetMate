@@ -8,11 +8,27 @@ struct PrintableBudgetRuleRow: Identifiable {
     var badge: String?
 }
 
+struct PrintableBudgetRuleSubCategoryGroup: Identifiable {
+    let id: UUID
+    let title: String
+    let subtotal: String
+    let rows: [PrintableBudgetRuleRow]
+}
+
+struct PrintableBudgetRuleSectionContent {
+    var groups: [PrintableBudgetRuleSubCategoryGroup] = []
+    var ungrouped: [PrintableBudgetRuleRow] = []
+
+    var isEmpty: Bool {
+        groups.isEmpty && ungrouped.isEmpty
+    }
+}
+
 struct BudgetRulesPrintView: View {
     let summary: BudgetRuleService.Summary
     let currency: AppCurrency
-    let incoming: [PrintableBudgetRuleRow]
-    let outgoing: [PrintableBudgetRuleRow]
+    let incoming: PrintableBudgetRuleSectionContent
+    let outgoing: PrintableBudgetRuleSectionContent
     let other: [PrintableBudgetRuleRow]
     var footnote: String?
 
@@ -29,15 +45,57 @@ struct BudgetRulesPrintView: View {
             }
 
             if !incoming.isEmpty {
-                ruleSection(title: "Incoming", rules: incoming)
+                groupedRuleSection(title: "Incoming", content: incoming)
             }
 
             if !outgoing.isEmpty {
-                ruleSection(title: "Outgoing", rules: outgoing)
+                groupedRuleSection(title: "Outgoing", content: outgoing)
             }
 
             if !other.isEmpty {
                 ruleSection(title: "Other", rules: other)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func groupedRuleSection(title: String, content: PrintableBudgetRuleSectionContent) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PrintSectionHeader(title: title)
+            ForEach(content.groups) { group in
+                HStack {
+                    Text(group.title)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text(group.subtotal)
+                        .font(.subheadline.monospacedDigit())
+                }
+                .padding(.vertical, 4)
+                ForEach(group.rows) { rule in
+                    PrintRuleRow(
+                        name: rule.name,
+                        metadata: rule.metadata,
+                        amount: rule.amount,
+                        badge: rule.badge
+                    )
+                    .padding(.leading, 12)
+                }
+            }
+            if !content.ungrouped.isEmpty {
+                if !content.groups.isEmpty {
+                    Text("Uncategorised")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                }
+                ForEach(content.ungrouped) { rule in
+                    PrintRuleRow(
+                        name: rule.name,
+                        metadata: rule.metadata,
+                        amount: rule.amount,
+                        badge: rule.badge
+                    )
+                }
             }
         }
     }

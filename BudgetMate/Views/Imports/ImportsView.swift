@@ -456,9 +456,9 @@ struct ImportsView: View {
     private var transactionsHelpText: String {
         switch importSession.flowFocus {
         case .incoming:
-            return "Select income items with the round buttons to group missed recurring payments as monthly income above. You can also import one-off tiles, create a single recurring rule, or exclude items."
+            return "Select income items with the round buttons to group missed recurring payments as monthly income above, create budget rules directly, or import one-offs."
         case .outgoing:
-            return "Select bills, direct debits, or savings items with the round buttons to group missed recurring payments above. You can also import one-off tiles, create a single recurring rule, or exclude items."
+            return "Select bills, direct debits, or savings items with the round buttons to group missed recurring payments above, create budget rules directly, or import one-offs."
         }
     }
 
@@ -470,6 +470,13 @@ struct ImportsView: View {
         )
         guard types.count == 1, let type = types.first else { return nil }
         return type
+    }
+
+    private var selectedEligibleRows: [ImportPreviewRow] {
+        importSession.previewRows.filter {
+            selectedTransactionIDs.contains($0.id)
+                && ($0.budgetType == .income || $0.budgetType == .expense || $0.budgetType == .saving)
+        }
     }
 
     private var groupSelectedButtonTitle: String {
@@ -488,16 +495,27 @@ struct ImportsView: View {
                 .foregroundStyle(.secondary)
 
             Button {
-                groupSelectedTransactions()
+                createBudgetRulesFromSelection()
             } label: {
-                Label(groupSelectedButtonTitle, systemImage: "arrow.triangle.2.circlepath")
+                Label("Create budget rules", systemImage: "arrow.triangle.2.circlepath")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
+            .disabled(selectedEligibleRows.isEmpty || !featureGate.isAvailable(.csvImport))
+            .help("Save one budget rule per payee from the selected transactions")
+
+            Button {
+                groupSelectedTransactions()
+            } label: {
+                Label(groupSelectedButtonTitle, systemImage: "rectangle.stack.badge.plus")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
             .disabled(selectedRowsBudgetType == nil)
+            .help("Add selected payees to the recurring suggestions above for review before saving")
 
             if selectedRowsBudgetType == nil && !selectedTransactionIDs.isEmpty {
-                Text("Select items of the same type")
+                Text("Group requires the same type")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -528,17 +546,70 @@ struct ImportsView: View {
             return
         }
 
-        guard let suggestion = importSession.addManualSuggestion(from: rows, cycle: .monthly) else {
-            importSession.parseError = "Could not group selected transactions — select items of the same type (income, bill, or saving)."
+        let suggestions = importSession.addManualSuggestions(from: rows, cycle: .monthly)
+        guard !suggestions.isEmpty else {
+            importSession.parseError = "Could not group selected transactions — select income, bill, or saving items of the same type."
             return
         }
 
         selectedTransactionIDs = []
-        let sectionLabel = recurringSectionLabel(for: suggestion.budgetType)
-        importSession.importMessage = "Added \"\(suggestion.name)\" to \(sectionLabel) above."
-        let suggestionID = suggestion.id
-        presentUndo(message: "Grouped \(suggestion.name) as \(sectionLabel)") {
-            importSession.removeSuggestion(id: suggestionID)
+        let sectionLabel = recurringSectionLabel(for: suggestions[0].budgetType)
+        if suggestions.count == 1 {
+            importSession.importMessage = "Added \"\(suggestions[0].name)\" to \(sectionLabel) above — press Create budget rules when ready."
+        } else {
+            importSession.importMessage = "Added \(suggestions.count) payees to \(sectionLabel) above — press Create budget rules when ready."
+        }
+        let suggestionIDs = suggestions.map(\.id)
+        presentUndo(message: "Grouped \(suggestions.count) payee(s) as \(sectionLabel)") {
+            for id in suggestionIDs {
+                importSession.removeSuggestion(id: id)
+            }
+        }
+    }
+
+    private func createBudgetRulesFromSelection() {
+        guard featureGate.isAvailable(.csvImport) else { return }
+
+        let rows = selectedEligibleRows
+        guard !rows.isEmpty else {
+            importSession.parseError = "Select income, bill, or saving items to create budget rules."
+            return
+        }
+
+        do {
+            let results = try BudgetSuggestionService.createRules(
+                from: rows,
+                payeeNotes: payeeNoteIndex,
+                in: modelContext
+            )
+            guard !results.isEmpty else { return }
+
+            let excludedRows = rows
+            for row in excludedRows {
+                importSession.excludeRow(row)
+            }
+            selectedTransactionIDs = []
+
+            let count = results.count
+            importSession.importMessage = "Created \(count) budget rule\(count == 1 ? "" : "s") in Budget Rules and generated forecast tiles."
+            let ruleIDs = results.map(\.ruleID)
+            let names = results.map(\.name)
+            presentUndo(message: "Created \(count) budget rule\(count == 1 ? "" : "s")") {
+                do {
+                    for id in ruleIDs {
+                        try BudgetSuggestionService.deleteRule(id: id, in: modelContext)
+                    }
+                    for row in excludedRows {
+                        importSession.restoreRow(row)
+                    }
+                    importSession.refreshAnalysis()
+                } catch {
+                    importSession.parseError = error.localizedDescription
+                }
+            }
+            importSession.refreshAnalysis()
+        } catch {
+            importSession.parseError = error.localizedDescription
         }
     }
 
@@ -926,12 +997,12 @@ private struct ImportRowHeader: View {
                 .frame(width: 110, alignment: .leading)
             Text("Type")
                 .frame(width: 110, alignment: .leading)
-            Text("Category")
+            Text("Sub-category")
                 .frame(width: 110, alignment: .leading)
             Text("Amount")
                 .frame(width: 90, alignment: .trailing)
             Text("")
-                .frame(width: 56)
+                .frame(width: 84)
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
@@ -1028,7 +1099,7 @@ private struct ImportTransactionRowView: View {
             .labelsHidden()
             .frame(width: 110)
 
-            TextField("Category", text: $row.category)
+            TextField("Sub-category", text: $row.suggestedSubCategoryTitle)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 110)
 
@@ -1044,6 +1115,13 @@ private struct ImportTransactionRowView: View {
                 .buttonStyle(.plain)
                 .help("Import as one-off tile in this transaction's month")
 
+                Button(action: onCreateRecurringRule) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+                .help("Create recurring budget rule from this transaction")
+
                 Button {
                     onRemove()
                 } label: {
@@ -1053,7 +1131,7 @@ private struct ImportTransactionRowView: View {
                 .buttonStyle(.plain)
                 .help("Exclude from import")
             }
-            .frame(width: 56)
+            .frame(width: 84)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

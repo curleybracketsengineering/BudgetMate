@@ -4,7 +4,7 @@ struct BudgetSuggestion: Identifiable, Hashable {
     let id: UUID
     var name: String
     var budgetType: BudgetType
-    var category: String
+    var suggestedSubCategoryTitle: String
     var cycle: BudgetCycleType
     /// Amount per occurrence (what appears on each payment).
     var amountMinorUnits: Int
@@ -32,7 +32,7 @@ struct BudgetSuggestion: Identifiable, Hashable {
         id: UUID = UUID(),
         name: String,
         budgetType: BudgetType,
-        category: String,
+        suggestedSubCategoryTitle: String,
         cycle: BudgetCycleType,
         amountMinorUnits: Int,
         monthlyEquivalentMinorUnits: Int,
@@ -56,7 +56,7 @@ struct BudgetSuggestion: Identifiable, Hashable {
         self.id = id
         self.name = name
         self.budgetType = budgetType
-        self.category = category
+        self.suggestedSubCategoryTitle = suggestedSubCategoryTitle
         self.cycle = cycle
         self.amountMinorUnits = amountMinorUnits
         self.monthlyEquivalentMinorUnits = monthlyEquivalentMinorUnits

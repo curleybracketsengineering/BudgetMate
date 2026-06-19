@@ -7,12 +7,12 @@ enum TransactionCategorizationService {
             return ImportPreviewRow(
                 transaction: transaction,
                 budgetType: classification.type,
-                category: classification.category
+                suggestedSubCategoryTitle: classification.suggestedSubCategoryTitle
             )
         }
     }
 
-    static func classify(_ transaction: BankTransactionRow) -> (type: BudgetType, category: String) {
+    static func classify(_ transaction: BankTransactionRow) -> (type: BudgetType, suggestedSubCategoryTitle: String) {
         let payee = transaction.payee.uppercased()
         let memo = transaction.memo.uppercased()
         let combined = "\(payee) \(memo)"

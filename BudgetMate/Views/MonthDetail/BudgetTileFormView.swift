@@ -13,7 +13,7 @@ struct BudgetTileFormView: View {
     @State private var name = ""
     @State private var amountText = ""
     @State private var type: BudgetType = .expense
-    @State private var category = ""
+    @State private var subCategory: BudgetRuleSubCategory?
     @State private var year: Int
     @State private var month: Int
     @State private var status: BudgetTileStatus = .active
@@ -43,7 +43,12 @@ struct BudgetTileFormView: View {
                             Text(t.displayName).tag(t)
                         }
                     }
-                    TextField("Category", text: $category)
+                    if let orderGroup = BudgetRuleService.OrderGroup.forPicker(from: type) {
+                        BudgetRuleSubCategoryPicker(
+                            selectedSubCategory: $subCategory,
+                            orderGroup: orderGroup
+                        )
+                    }
                     if type == .transfer {
                         TransferAccountFields(
                             fromAccountId: $linkedAccountId,
@@ -98,6 +103,11 @@ struct BudgetTileFormView: View {
                 if newType != .transfer {
                     transferToAccountId = nil
                 }
+                if BudgetRuleService.OrderGroup.forPicker(from: newType) == nil {
+                    subCategory = nil
+                } else if let subCategory, subCategory.orderGroup != BudgetRuleService.OrderGroup.forType(newType) {
+                    self.subCategory = nil
+                }
             }
         }
         .frame(minWidth: 400, minHeight: 480)
@@ -108,7 +118,7 @@ struct BudgetTileFormView: View {
         name = tile.name
         amountText = MoneyFormatter.majorUnitsString(minorUnits: tile.amountMinorUnits, currency: currency)
         type = tile.type
-        category = tile.category
+        subCategory = tile.subCategory
         year = tile.year
         month = tile.month
         status = tile.status
@@ -134,7 +144,7 @@ struct BudgetTileFormView: View {
         tile.name = name
         tile.amountMinorUnits = amount
         tile.type = type
-        tile.category = category
+        tile.subCategory = BudgetRuleService.OrderGroup.forPicker(from: type) != nil ? subCategory : nil
         tile.year = year
         tile.month = month
         tile.status = status

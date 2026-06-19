@@ -48,8 +48,8 @@ enum ExportService {
     static func budgetRulesCSVData(
         summary: BudgetRuleService.Summary,
         currency: AppCurrency,
-        incoming: [PrintableBudgetRuleRow],
-        outgoing: [PrintableBudgetRuleRow],
+        incoming: PrintableBudgetRuleSectionContent,
+        outgoing: PrintableBudgetRuleSectionContent,
         other: [PrintableBudgetRuleRow],
         footnote: String? = nil
     ) -> Data {
@@ -69,12 +69,42 @@ enum ExportService {
         }
         lines.append("\(csvField("Net / month")),\(csvField(MoneyFormatter.majorUnitsString(minorUnits: summary.netMinorUnits, currency: currency)))")
         lines.append("")
-        lines.append("Section,Name,Details,Amount,Status")
+        lines.append("Section,Sub-category,Name,Details,Amount,Status")
 
-        for section in [("Incoming", incoming), ("Outgoing", outgoing), ("Other", other)] {
-            for rule in section.1 {
+        appendGroupedSection("Incoming", content: incoming, to: &lines)
+        appendGroupedSection("Outgoing", content: outgoing, to: &lines)
+        for rule in other {
+            lines.append([
+                csvField("Other"),
+                csvField(""),
+                csvField(rule.name),
+                csvField(rule.metadata),
+                csvField(rule.amount),
+                csvField(rule.badge ?? "")
+            ].joined(separator: ","))
+        }
+
+        return Data((lines.joined(separator: "\n") + "\n").utf8)
+    }
+
+    private static func appendGroupedSection(
+        _ sectionTitle: String,
+        content: PrintableBudgetRuleSectionContent,
+        to lines: inout [String]
+    ) {
+        for group in content.groups {
+            lines.append([
+                csvField(sectionTitle),
+                csvField("\(group.title) subtotal"),
+                csvField(""),
+                csvField(""),
+                csvField(group.subtotal),
+                csvField("")
+            ].joined(separator: ","))
+            for rule in group.rows {
                 lines.append([
-                    csvField(section.0),
+                    csvField(sectionTitle),
+                    csvField(group.title),
                     csvField(rule.name),
                     csvField(rule.metadata),
                     csvField(rule.amount),
@@ -82,8 +112,16 @@ enum ExportService {
                 ].joined(separator: ","))
             }
         }
-
-        return Data((lines.joined(separator: "\n") + "\n").utf8)
+        for rule in content.ungrouped {
+            lines.append([
+                csvField(sectionTitle),
+                csvField(""),
+                csvField(rule.name),
+                csvField(rule.metadata),
+                csvField(rule.amount),
+                csvField(rule.badge ?? "")
+            ].joined(separator: ","))
+        }
     }
 
     private static func csvField(_ value: String) -> String {

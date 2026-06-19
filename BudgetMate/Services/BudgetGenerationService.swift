@@ -313,8 +313,8 @@ enum BudgetGenerationService {
             tile.type = rule.type
             changed = true
         }
-        if tile.category != rule.category {
-            tile.category = rule.category
+        if tile.subCategory?.id != rule.subCategory?.id {
+            tile.subCategory = rule.subCategory
             changed = true
         }
         if tile.confidence != rule.confidence {

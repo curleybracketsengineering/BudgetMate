@@ -9,6 +9,7 @@ final class BudgetTile {
     var name: String = ""
     var amountMinorUnits: Int = 0
     var typeRaw: String = BudgetType.expense.rawValue
+    /// Legacy field — read only during one-time sub-category migration, then cleared.
     var category: String = ""
     var sourceRaw: String = BudgetTileSource.manual.rawValue
     var statusRaw: String = BudgetTileStatus.active.rawValue
@@ -22,6 +23,7 @@ final class BudgetTile {
     var linkedAccountId: UUID?
     /// Destination account for transfers. Source is linkedAccountId (nil = Main).
     var transferToAccountId: UUID?
+    var subCategory: BudgetRuleSubCategory?
     var notes: String = ""
     var createdAt: Date = Date()
     var updatedAt: Date = Date()

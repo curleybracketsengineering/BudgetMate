@@ -12,7 +12,7 @@ struct BudgetRuleFormView: View {
     @State private var name = ""
     @State private var amountText = ""
     @State private var type: BudgetType = .expense
-    @State private var category = ""
+    @State private var subCategory: BudgetRuleSubCategory?
     @State private var cycle: BudgetCycleType = .monthly
     @State private var startDate = Date.now
     @State private var hasEndDate = false
@@ -39,7 +39,7 @@ struct BudgetRuleFormView: View {
                     name: $name,
                     amountText: $amountText,
                     type: $type,
-                    category: $category,
+                    subCategory: $subCategory,
                     cycle: $cycle,
                     startDate: $startDate,
                     hasEndDate: $hasEndDate,
@@ -69,6 +69,11 @@ struct BudgetRuleFormView: View {
                 if newType != .transfer {
                     transferToAccountId = nil
                 }
+                if BudgetRuleService.OrderGroup.forPicker(from: newType) == nil {
+                    subCategory = nil
+                } else if let subCategory, subCategory.orderGroup != BudgetRuleService.OrderGroup.forType(newType) {
+                    self.subCategory = nil
+                }
             }
         }
         .frame(minWidth: 420, minHeight: 520)
@@ -80,7 +85,7 @@ struct BudgetRuleFormView: View {
             name = loaded.name
             amountText = loaded.amountText
             type = loaded.type
-            category = loaded.category
+            subCategory = loaded.subCategory
             cycle = loaded.cycle
             startDate = loaded.startDate
             hasEndDate = loaded.hasEndDate
@@ -100,7 +105,14 @@ struct BudgetRuleFormView: View {
         guard let template else { return }
         name = template.name
         type = template.type
-        category = template.category
+        if let orderGroup = BudgetRuleService.OrderGroup.forPicker(from: template.type),
+           !template.defaultSubCategoryTitle.isEmpty {
+            subCategory = BudgetRuleSubCategoryService.findOrCreate(
+                orderGroup: orderGroup,
+                title: template.defaultSubCategoryTitle,
+                in: modelContext
+            )
+        }
         cycle = template.cycle
         commitment = template.commitment
         confidence = template.confidence
@@ -123,7 +135,7 @@ struct BudgetRuleFormView: View {
             name: name,
             amountText: amountText,
             type: type,
-            category: category,
+            subCategory: subCategory,
             cycle: cycle,
             startDate: startDate,
             hasEndDate: hasEndDate,

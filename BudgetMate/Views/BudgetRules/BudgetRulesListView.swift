@@ -5,6 +5,7 @@ struct BudgetRulesListView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(FeatureGateService.self) private var featureGate
     @Query(sort: [SortDescriptor(\BudgetRule.displayOrder), SortDescriptor(\BudgetRule.name)]) private var rules: [BudgetRule]
+    @Query(sort: \BudgetRuleSubCategory.sortOrder) private var subCategories: [BudgetRuleSubCategory]
     @Query private var settingsList: [AppSettings]
     @Query private var tiles: [BudgetTile]
     @Query(sort: \BankAccount.displayOrder) private var accounts: [BankAccount]
@@ -17,6 +18,12 @@ struct BudgetRulesListView: View {
     @State private var rulePendingDeletion: BudgetRule?
     @State private var filterAccountId: UUID?
     @State private var generateAlert: GenerateTilesAlert?
+    @State private var expandedSubCategoryIDs: Set<UUID> = []
+    @State private var orderGroupPendingAdd: BudgetRuleService.OrderGroup?
+    @State private var newSubCategoryTitle = ""
+    @State private var subCategoryPendingRename: BudgetRuleSubCategory?
+    @State private var subCategoryRenameTitle = ""
+    @State private var subCategoryPendingDelete: BudgetRuleSubCategory?
 
     private var currency: AppCurrency { settingsList.first?.currency ?? .GBP }
 
@@ -154,6 +161,58 @@ struct BudgetRulesListView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
+        .alert("New sub-category", isPresented: addSubCategoryPresented) {
+            TextField("Name", text: $newSubCategoryTitle)
+            Button("Add") { confirmAddSubCategory() }
+            Button("Cancel", role: .cancel) {
+                orderGroupPendingAdd = nil
+                newSubCategoryTitle = ""
+            }
+        }
+        .alert("Rename sub-category", isPresented: renameSubCategoryPresented) {
+            TextField("Name", text: $subCategoryRenameTitle)
+            Button("Save") { confirmRenameSubCategory() }
+            Button("Cancel", role: .cancel) {
+                subCategoryPendingRename = nil
+                subCategoryRenameTitle = ""
+            }
+        }
+        .confirmationDialog(
+            "Delete sub-category?",
+            isPresented: Binding(
+                get: { subCategoryPendingDelete != nil },
+                set: { if !$0 { subCategoryPendingDelete = nil } }
+            ),
+            presenting: subCategoryPendingDelete
+        ) { subCategory in
+            Button("Delete", role: .destructive) {
+                deleteSubCategory(subCategory)
+            }
+            Button("Cancel", role: .cancel) {
+                subCategoryPendingDelete = nil
+            }
+        } message: { subCategory in
+            let count = subCategory.rules.count
+            if count > 0 {
+                Text("\"\(subCategory.title)\" will be removed. \(count) rule\(count == 1 ? "" : "s") will become uncategorised.")
+            } else {
+                Text("\"\(subCategory.title)\" will be removed.")
+            }
+        }
+    }
+
+    private var addSubCategoryPresented: Binding<Bool> {
+        Binding(
+            get: { orderGroupPendingAdd != nil },
+            set: { if !$0 { orderGroupPendingAdd = nil; newSubCategoryTitle = "" } }
+        )
+    }
+
+    private var renameSubCategoryPresented: Binding<Bool> {
+        Binding(
+            get: { subCategoryPendingRename != nil },
+            set: { if !$0 { subCategoryPendingRename = nil; subCategoryRenameTitle = "" } }
+        )
     }
 
     private var header: some View {
@@ -239,16 +298,20 @@ struct BudgetRulesListView: View {
 
     private var rulesList: some View {
         List(selection: $selectedRule) {
-            if !incomingRules.isEmpty {
-                Section("Incoming") {
-                    reorderableRuleRows(incomingRules, move: moveIncomingRules)
-                }
+            if shouldShowIncomingSection {
+                orderGroupSection(
+                    title: "Incoming",
+                    orderGroup: .incoming,
+                    groupRules: incomingRules
+                )
             }
 
-            if !outgoingRules.isEmpty {
-                Section("Outgoing") {
-                    reorderableRuleRows(outgoingRules, move: moveOutgoingRules)
-                }
+            if shouldShowOutgoingSection {
+                orderGroupSection(
+                    title: "Outgoing",
+                    orderGroup: .outgoing,
+                    groupRules: outgoingRules
+                )
             }
 
             if !otherRules.isEmpty {
@@ -259,7 +322,7 @@ struct BudgetRulesListView: View {
                 }
             }
 
-            if filteredRules.isEmpty {
+            if filteredRules.isEmpty && subCategories.isEmpty {
                 ContentUnavailableView(
                     "No matching rules",
                     systemImage: "magnifyingglass",
@@ -271,6 +334,122 @@ struct BudgetRulesListView: View {
         }
         .listStyle(.plain)
         .environment(\.defaultMinListRowHeight, 32)
+    }
+
+    private var shouldShowIncomingSection: Bool {
+        !incomingRules.isEmpty || !visibleSubCategories(for: .incoming).isEmpty
+    }
+
+    private var shouldShowOutgoingSection: Bool {
+        !outgoingRules.isEmpty || !visibleSubCategories(for: .outgoing).isEmpty
+    }
+
+    private func visibleSubCategories(for orderGroup: BudgetRuleService.OrderGroup) -> [BudgetRuleSubCategory] {
+        let all = BudgetRuleSubCategoryService.subCategories(for: orderGroup, from: subCategories)
+        if canReorder {
+            return all
+        }
+        return all.filter { subCategory in
+            !BudgetRuleSubCategoryService.rules(in: subCategory, from: filteredRules).isEmpty
+        }
+    }
+
+    @ViewBuilder
+    private func orderGroupSection(
+        title: String,
+        orderGroup: BudgetRuleService.OrderGroup,
+        groupRules: [BudgetRule]
+    ) -> some View {
+        Section {
+            let visible = visibleSubCategories(for: orderGroup)
+            if canReorder {
+                ForEach(visible, id: \.id) { subCategory in
+                    subCategoryGroup(subCategory, orderGroup: orderGroup)
+                }
+                .onMove { source, destination in
+                    moveSubCategories(in: orderGroup, from: source, to: destination)
+                }
+            } else {
+                ForEach(visible, id: \.id) { subCategory in
+                    subCategoryGroup(subCategory, orderGroup: orderGroup)
+                }
+            }
+
+            let uncategorised = BudgetRuleSubCategoryService.uncategorisedRules(
+                in: orderGroup,
+                from: filteredRules,
+                subCategories: subCategories
+            )
+            if !uncategorised.isEmpty {
+                if !visible.isEmpty {
+                    Text("Uncategorised")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 2, trailing: 8))
+                }
+                reorderableRuleRows(uncategorised) { source, destination in
+                    moveRules(in: uncategorised, from: source, to: destination)
+                }
+            }
+        } header: {
+            HStack {
+                Text(title)
+                Spacer()
+                Button {
+                    orderGroupPendingAdd = orderGroup
+                    newSubCategoryTitle = ""
+                } label: {
+                    Label("Add sub-category", systemImage: "folder.badge.plus")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help("Add sub-category")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func subCategoryGroup(
+        _ subCategory: BudgetRuleSubCategory,
+        orderGroup: BudgetRuleService.OrderGroup
+    ) -> some View {
+        let subCategoryRules = BudgetRuleSubCategoryService.rules(in: subCategory, from: filteredRules)
+        if !subCategoryRules.isEmpty || canReorder {
+            BudgetRuleSubCategoryRowView(
+                subCategory: subCategory,
+                rules: subCategoryRules,
+                currency: currency,
+                monthlyTotal: BudgetRuleSubCategoryService.monthlyTotal(for: subCategoryRules),
+                isExpanded: isExpandedBinding(for: subCategory.id),
+                canReorder: canReorder,
+                onRename: {
+                    subCategoryPendingRename = subCategory
+                    subCategoryRenameTitle = subCategory.title
+                },
+                onDelete: {
+                    subCategoryPendingDelete = subCategory
+                },
+                onMoveRules: canReorder ? { source, destination in
+                    moveRules(in: subCategoryRules, from: source, to: destination)
+                } : nil
+            ) { rule in
+                ruleRow(rule)
+            }
+            .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+        }
+    }
+
+    private func isExpandedBinding(for id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { expandedSubCategoryIDs.contains(id) },
+            set: { expanded in
+                if expanded {
+                    expandedSubCategoryIDs.insert(id)
+                } else {
+                    expandedSubCategoryIDs.remove(id)
+                }
+            }
+        )
     }
 
     @ViewBuilder
@@ -410,12 +589,43 @@ struct BudgetRulesListView: View {
         }
     }
 
-    private func moveIncomingRules(from source: IndexSet, to destination: Int) {
-        moveRules(in: incomingRules, from: source, to: destination)
+    private func moveSubCategories(
+        in orderGroup: BudgetRuleService.OrderGroup,
+        from source: IndexSet,
+        to destination: Int
+    ) {
+        var ordered = BudgetRuleSubCategoryService.subCategories(for: orderGroup, from: subCategories)
+        ordered.move(fromOffsets: source, toOffset: destination)
+        BudgetRuleSubCategoryService.persistSortOrder(ordered, in: modelContext)
     }
 
-    private func moveOutgoingRules(from source: IndexSet, to destination: Int) {
-        moveRules(in: outgoingRules, from: source, to: destination)
+    private func confirmAddSubCategory() {
+        guard let orderGroup = orderGroupPendingAdd else { return }
+        _ = BudgetRuleSubCategoryService.addSubCategory(
+            orderGroup: orderGroup,
+            title: newSubCategoryTitle,
+            existing: subCategories,
+            in: modelContext
+        )
+        orderGroupPendingAdd = nil
+        newSubCategoryTitle = ""
+    }
+
+    private func confirmRenameSubCategory() {
+        guard let subCategory = subCategoryPendingRename else { return }
+        BudgetRuleSubCategoryService.renameSubCategory(
+            subCategory,
+            to: subCategoryRenameTitle,
+            in: modelContext
+        )
+        subCategoryPendingRename = nil
+        subCategoryRenameTitle = ""
+    }
+
+    private func deleteSubCategory(_ subCategory: BudgetRuleSubCategory) {
+        BudgetRuleSubCategoryService.deleteSubCategory(subCategory, in: modelContext)
+        expandedSubCategoryIDs.remove(subCategory.id)
+        subCategoryPendingDelete = nil
     }
 
     private func moveRules(in groupRules: [BudgetRule], from source: IndexSet, to destination: Int) {
@@ -520,8 +730,8 @@ struct BudgetRulesListView: View {
         BudgetRulesPrintView(
             summary: summary,
             currency: currency,
-            incoming: printableRows(for: incomingRules),
-            outgoing: printableRows(for: outgoingRules),
+            incoming: printableSectionContent(for: .incoming, rules: incomingRules),
+            outgoing: printableSectionContent(for: .outgoing, rules: outgoingRules),
             other: printableRows(for: otherRules),
             footnote: exportFootnote
         )
@@ -543,12 +753,40 @@ struct BudgetRulesListView: View {
         let data = ExportService.budgetRulesCSVData(
             summary: summary,
             currency: currency,
-            incoming: printableRows(for: incomingRules),
-            outgoing: printableRows(for: outgoingRules),
+            incoming: printableSectionContent(for: .incoming, rules: incomingRules),
+            outgoing: printableSectionContent(for: .outgoing, rules: outgoingRules),
             other: printableRows(for: otherRules),
             footnote: exportFootnote
         )
         ExportService.saveCSV(data: data, suggestedFilename: "Budget Rules.csv")
+    }
+
+    private func printableSectionContent(
+        for orderGroup: BudgetRuleService.OrderGroup,
+        rules: [BudgetRule]
+    ) -> PrintableBudgetRuleSectionContent {
+        var groups: [PrintableBudgetRuleSubCategoryGroup] = []
+        for subCategory in BudgetRuleSubCategoryService.subCategories(for: orderGroup, from: subCategories) {
+            let subCategoryRules = BudgetRuleSubCategoryService.rules(in: subCategory, from: rules)
+            guard !subCategoryRules.isEmpty else { continue }
+            let total = BudgetRuleSubCategoryService.monthlyTotal(for: subCategoryRules)
+            groups.append(
+                PrintableBudgetRuleSubCategoryGroup(
+                    id: subCategory.id,
+                    title: subCategory.title,
+                    subtotal: "\(MoneyFormatter.format(minorUnits: total, currency: currency)) / mo",
+                    rows: printableRows(for: subCategoryRules)
+                )
+            )
+        }
+        let ungrouped = printableRows(
+            for: BudgetRuleSubCategoryService.uncategorisedRules(
+                in: orderGroup,
+                from: rules,
+                subCategories: subCategories
+            )
+        )
+        return PrintableBudgetRuleSectionContent(groups: groups, ungrouped: ungrouped)
     }
 
     private func printableRows(for rules: [BudgetRule]) -> [PrintableBudgetRuleRow] {

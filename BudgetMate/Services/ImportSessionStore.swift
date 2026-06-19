@@ -77,16 +77,30 @@ final class ImportSessionStore {
 
     @discardableResult
     func addManualSuggestion(from rows: [ImportPreviewRow], cycle: BudgetCycleType = .monthly) -> BudgetSuggestion? {
-        guard let suggestion = TransactionAnalysisService.makeManualSuggestion(
-            from: rows,
-            payeeNotes: payeeNotes,
-            amountBasis: amountBasis,
-            cycle: cycle
-        ) else { return nil }
+        addManualSuggestions(from: rows, cycle: cycle).first
+    }
 
-        var manual = suggestion
-        manual.isAccepted = true
-        budgetSuggestions.append(manual)
+    @discardableResult
+    func addManualSuggestions(from rows: [ImportPreviewRow], cycle: BudgetCycleType = .monthly) -> [BudgetSuggestion] {
+        let byPayee = Dictionary(grouping: rows, by: TransactionAnalysisService.payeeGroupKey(for:))
+        var created: [BudgetSuggestion] = []
+
+        for (_, payeeRows) in byPayee {
+            guard let suggestion = TransactionAnalysisService.makeManualSuggestion(
+                from: payeeRows,
+                payeeNotes: payeeNotes,
+                amountBasis: amountBasis,
+                cycle: cycle
+            ) else { continue }
+
+            var manual = suggestion
+            manual.isAccepted = true
+            budgetSuggestions.append(manual)
+            created.append(manual)
+        }
+
+        guard !created.isEmpty else { return [] }
+
         budgetSuggestions.sort { lhs, rhs in
             if lhs.budgetType != rhs.budgetType {
                 return lhs.budgetType == .income
@@ -97,7 +111,7 @@ final class ImportSessionStore {
             suggestions: budgetSuggestions,
             previewRows: previewRows
         )
-        return manual
+        return created
     }
 
     func removeSuggestion(id: UUID) {

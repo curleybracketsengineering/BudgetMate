@@ -42,7 +42,6 @@ final class FeatureGateService {
         case scenarios
         case holidayPlanner
         case csvImport
-        case aiAssistant
         case impactView
         case largePaymentWarnings
         case ruleExpiryWarnings
@@ -58,7 +57,6 @@ final class FeatureGateService {
             case .scenarios: "Scenario planning"
             case .holidayPlanner: "Holiday & event planner"
             case .csvImport: "CSV / QBO import"
-            case .aiAssistant: "AI Budget Assistant"
             case .impactView: "What changed / impact view"
             case .largePaymentWarnings: "Large payment warnings"
             case .ruleExpiryWarnings: "Rule expiry warnings"
@@ -74,7 +72,7 @@ final class FeatureGateService {
     func isAvailable(_ feature: ProFeature) -> Bool {
         switch feature {
         case .extendedForecast, .scenarios, .holidayPlanner, .csvImport,
-             .aiAssistant, .impactView, .largePaymentWarnings, .ruleExpiryWarnings,
+             .impactView, .largePaymentWarnings, .ruleExpiryWarnings,
              .yearlySummary, .plannedVsActual, .export, .confidenceLevels, .explainThisMonth:
             return isProUnlocked
         }

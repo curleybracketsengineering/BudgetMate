@@ -4,6 +4,7 @@ import SwiftData
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(FeatureGateService.self) private var featureGate
+    @Environment(ImportSessionStore.self) private var importSession
     @Query private var settingsList: [AppSettings]
     @Query(sort: \BankAccount.displayOrder) private var accounts: [BankAccount]
 
@@ -21,6 +22,7 @@ struct SettingsView: View {
     @State private var editingAccount: BankAccount?
     @State private var showingClearDataConfirmation = false
     @State private var showingStartAgain = false
+    @State private var showingWipeCompleteAlert = false
     @FocusState private var focusedMoneyField: MoneyField?
 
     private var settings: AppSettings? { settingsList.first }
@@ -34,21 +36,25 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            if let settings {
-                bankAccountsSection(settings)
-                planningSection(settings)
-                thresholdsSection(settings)
-                currencySection
-                proSection
-                iCloudSection(settings)
-                startAgainSection
-            } else {
-                Text("No settings found. Restart the app to run setup.")
+        NavigationStack {
+            Form {
+                if let settings {
+                    bankAccountsSection(settings)
+                    planningSection(settings)
+                    thresholdsSection(settings)
+                    currencySection
+                    travelSearchSection
+                    proSection
+                    dataSummarySection
+                    iCloudSection(settings)
+                    startAgainSection
+                } else {
+                    Text("No settings found. Restart the app to run setup.")
+                }
             }
+            .formStyle(.grouped)
+            .navigationTitle("Settings")
         }
-        .formStyle(.grouped)
-        .navigationTitle("Settings")
         .onAppear { loadFromSettings() }
         .onDisappear {
             guard didLoad else { return }
@@ -72,6 +78,11 @@ struct SettingsView: View {
         .sheet(isPresented: $showingStartAgain, onDismiss: reloadAfterStartAgain) {
             FirstRunSetupView()
         }
+        .alert("Reset complete", isPresented: $showingWipeCompleteAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("All data has been cleared. Quit BudgetMate (⌘Q) and open it again once to finish removing sync files, then complete setup.")
+        }
         .confirmationDialog(
             "Clear all data?",
             isPresented: $showingClearDataConfirmation,
@@ -81,7 +92,7 @@ struct SettingsView: View {
                 clearAllDataAndStartAgain()
             }
         } message: {
-            Text("This permanently deletes all budget data on this device — accounts, rules, months, and imports. If iCloud sync is on, the reset will sync to your other devices.")
+            Text("This permanently deletes all budget data — rules, tiles, accounts, imports, and both the local and iCloud database copies on this Mac. You will set up the app again from scratch.")
         }
     }
 
@@ -182,6 +193,32 @@ struct SettingsView: View {
         }
     }
 
+    private var travelSearchSection: some View {
+        Section("Travel search") {
+            NavigationLink {
+                TravelSearchSettingsView()
+            } label: {
+                Label("Travel search sites", systemImage: "airplane")
+            }
+            Text("Choose which sites open when you tap Find prices on a holiday.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var dataSummarySection: some View {
+        Section("Data") {
+            NavigationLink {
+                DatabaseSummaryView()
+            } label: {
+                Label("Data summary", systemImage: "externaldrive")
+            }
+            Text("See how many rules, tiles, and months are stored on this device.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var proSection: some View {
         Section("Pro unlock (dev)") {
             Toggle("Pro unlocked", isOn: Bindable(featureGate).isProUnlocked)
@@ -196,7 +233,7 @@ struct SettingsView: View {
             Button("Clear all data and start again", role: .destructive) {
                 showingClearDataConfirmation = true
             }
-            Text("Removes everything and walks you through setup from scratch.")
+            Text("Removes all data from this Mac (local and iCloud copies) and walks you through setup from scratch.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -253,9 +290,11 @@ struct SettingsView: View {
 
     private func clearAllDataAndStartAgain() {
         do {
-            try AppDataService.clearAllData(in: modelContext)
+            try AppDataService.wipeAllPersistedData(in: modelContext)
+            importSession.clear()
             didLoad = false
             showingStartAgain = true
+            showingWipeCompleteAlert = true
         } catch {
             print("Clear all data failed: \(error)")
         }
@@ -277,6 +316,12 @@ struct SettingsView: View {
 
     private func save(_ settings: AppSettings?) {
         guard let settings else { return }
+
+        let priorStartMonth = settings.planningStartMonth
+        let priorStartYear = settings.planningStartYear
+        let priorStartingBalance = settings.startingBalanceMinorUnits
+        let priorHorizon = settings.horizonMonths
+
         settings.planningStartMonth = planningStartMonth
         settings.planningStartYear = planningStartYear
         settings.horizonMonths = featureGate.normalizedHorizon(horizonMonths)
@@ -292,9 +337,18 @@ struct SettingsView: View {
         settings.largePaymentThresholdMinorUnits = MoneyFormatter.parseMajorUnits(largePaymentText, currency: currency) ?? settings.largePaymentThresholdMinorUnits
         settings.markUpdated()
 
+        let anchorChanged = planningStartMonth != priorStartMonth
+            || planningStartYear != priorStartYear
+            || settings.startingBalanceMinorUnits != priorStartingBalance
+            || settings.horizonMonths != priorHorizon
+
         do {
-            _ = try AppDataService.ensureMonths(settings: settings, in: modelContext)
-            try AppDataService.refreshForecast(in: modelContext)
+            if anchorChanged {
+                try AppDataService.reanchorPlan(settings: settings, in: modelContext)
+            } else {
+                _ = try AppDataService.ensureMonths(settings: settings, in: modelContext)
+                try AppDataService.refreshForecast(in: modelContext)
+            }
         } catch {
             print("Settings save failed: \(error)")
         }

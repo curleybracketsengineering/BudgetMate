@@ -10,6 +10,7 @@ import SwiftData
 struct BudgetMateApp: App {
     @State private var featureGate = FeatureGateService()
     @State private var importSession = ImportSessionStore()
+    @State private var travelSearch = TravelSearchStore()
 
     private let modelContainer = ModelContainerFactory.makeContainer()
 
@@ -18,6 +19,7 @@ struct BudgetMateApp: App {
             AppShellView()
                 .environment(featureGate)
                 .environment(importSession)
+                .environment(travelSearch)
         }
         .modelContainer(modelContainer)
         #if os(macOS)

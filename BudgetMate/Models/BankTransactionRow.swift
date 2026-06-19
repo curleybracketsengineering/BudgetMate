@@ -51,12 +51,12 @@ struct ImportPreviewRow: Identifiable {
     let id: UUID
     var transaction: BankTransactionRow
     var budgetType: BudgetType
-    var category: String
+    var suggestedSubCategoryTitle: String
 
-    init(transaction: BankTransactionRow, budgetType: BudgetType, category: String) {
+    init(transaction: BankTransactionRow, budgetType: BudgetType, suggestedSubCategoryTitle: String) {
         self.id = transaction.id
         self.transaction = transaction
         self.budgetType = budgetType
-        self.category = category
+        self.suggestedSubCategoryTitle = suggestedSubCategoryTitle
     }
 }

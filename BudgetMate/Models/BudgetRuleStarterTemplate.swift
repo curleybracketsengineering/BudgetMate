@@ -4,7 +4,7 @@ struct BudgetRuleStarterTemplate: Identifiable {
     let id: String
     let name: String
     let type: BudgetType
-    let category: String
+    let defaultSubCategoryTitle: String
     let cycle: BudgetCycleType
     let commitment: CommitmentType
     let confidence: ConfidenceLevel
@@ -16,7 +16,7 @@ struct BudgetRuleStarterTemplate: Identifiable {
             id: "salary",
             name: "Salary",
             type: .income,
-            category: "Income",
+            defaultSubCategoryTitle: "Income",
             cycle: .monthly,
             commitment: .known,
             confidence: .known,
@@ -27,7 +27,7 @@ struct BudgetRuleStarterTemplate: Identifiable {
             id: "rent",
             name: "Rent / mortgage",
             type: .expense,
-            category: "Housing",
+            defaultSubCategoryTitle: "Housing",
             cycle: .monthly,
             commitment: .known,
             confidence: .known,
@@ -38,7 +38,7 @@ struct BudgetRuleStarterTemplate: Identifiable {
             id: "council-tax",
             name: "Council tax",
             type: .expense,
-            category: "Bills",
+            defaultSubCategoryTitle: "Bills",
             cycle: .tenMonthly,
             commitment: .known,
             confidence: .known,
@@ -49,7 +49,7 @@ struct BudgetRuleStarterTemplate: Identifiable {
             id: "utilities",
             name: "Utilities",
             type: .expense,
-            category: "Bills",
+            defaultSubCategoryTitle: "Bills",
             cycle: .monthly,
             commitment: .known,
             confidence: .estimated,
@@ -60,7 +60,7 @@ struct BudgetRuleStarterTemplate: Identifiable {
             id: "savings",
             name: "Savings transfer",
             type: .saving,
-            category: "Savings",
+            defaultSubCategoryTitle: "Savings",
             cycle: .monthly,
             commitment: .known,
             confidence: .known,
@@ -71,7 +71,7 @@ struct BudgetRuleStarterTemplate: Identifiable {
             id: "account-transfer",
             name: "Account transfer",
             type: .transfer,
-            category: "Transfer",
+            defaultSubCategoryTitle: "Transfer",
             cycle: .monthly,
             commitment: .known,
             confidence: .known,

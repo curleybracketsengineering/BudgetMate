@@ -66,8 +66,7 @@ struct FirstRunSetupView: View {
         modelContext.insert(mainAccount)
 
         do {
-            _ = try AppDataService.ensureMonths(settings: settings, in: modelContext)
-            try AppDataService.refreshForecast(in: modelContext)
+            try AppDataService.reanchorPlan(settings: settings, in: modelContext)
             dismiss()
         } catch {
             print("First run setup failed: \(error)")

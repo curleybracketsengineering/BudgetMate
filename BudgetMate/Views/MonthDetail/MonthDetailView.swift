@@ -77,7 +77,7 @@ struct MonthDetailView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            let level = settings.map { CashFlowService.thresholdLevel(balance: month.closingBalanceMinorUnits, settings: $0) }
+            let level = settings.map { CashFlowService.thresholdLevel(balance: aggregateClosingMinorUnits, settings: $0) }
             if let level {
                 Text(level == .safe ? "Safe" : level == .warning ? "Warning" : "Critical")
                     .font(.caption.weight(.semibold))
@@ -88,29 +88,57 @@ struct MonthDetailView: View {
         }
     }
 
+    private var aggregateOpeningMinorUnits: Int {
+        guard !accountBalances.isEmpty else { return month.openingBalanceMinorUnits }
+        return accountBalances.reduce(0) { $0 + $1.openingBalanceMinorUnits }
+    }
+
+    private var aggregateClosingMinorUnits: Int {
+        guard !accountBalances.isEmpty else { return month.closingBalanceMinorUnits }
+        return accountBalances.reduce(0) { $0 + $1.closingBalanceMinorUnits }
+    }
+
     private var summaryCards: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 140))], spacing: 12) {
-            SummaryCard(title: "Opening", amount: MoneyFormatter.format(minorUnits: month.openingBalanceMinorUnits, currency: currency))
+            SummaryCard(title: "Opening", amount: MoneyFormatter.format(minorUnits: aggregateOpeningMinorUnits, currency: currency))
             SummaryCard(title: "Income", amount: MoneyFormatter.format(minorUnits: totals.income, currency: currency), tint: .green)
             SummaryCard(title: "Expenses", amount: MoneyFormatter.format(minorUnits: totals.expense, currency: currency), tint: .red)
             SummaryCard(title: "Savings", amount: MoneyFormatter.format(minorUnits: totals.saving, currency: currency))
-            SummaryCard(title: "Closing", amount: MoneyFormatter.format(minorUnits: month.closingBalanceMinorUnits, currency: currency), tint: .primary)
+            SummaryCard(title: "Closing", amount: MoneyFormatter.format(minorUnits: aggregateClosingMinorUnits, currency: currency), tint: .primary)
         }
     }
 
     private var accountBreakdown: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("By account")
                 .font(.title3.weight(.semibold))
+
+            accountBalanceSection("Opening", keyPath: \.openingBalanceMinorUnits)
+            accountBalanceSection("Closing", keyPath: \.closingBalanceMinorUnits, bold: true)
+        }
+    }
+
+    private func accountBalanceSection(
+        _ label: String,
+        keyPath: KeyPath<AccountMonthBalance, Int>,
+        bold: Bool = false
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(bold ? .subheadline.weight(.semibold) : .subheadline)
+                .foregroundStyle(.secondary)
 
             ForEach(accounts) { account in
                 if let balance = accountBalances.first(where: { $0.accountId == account.id }) {
                     HStack {
                         Text(account.name)
-                            .font(.subheadline)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 8)
                         Spacer()
-                        Text(MoneyFormatter.format(minorUnits: balance.closingBalanceMinorUnits, currency: currency))
-                            .font(.subheadline.monospacedDigit())
+                        Text(MoneyFormatter.format(minorUnits: balance[keyPath: keyPath], currency: currency))
+                            .font(bold ? .caption.weight(.semibold) : .caption)
+                            .monospacedDigit()
                     }
                 }
             }
@@ -218,7 +246,12 @@ struct MonthDetailView: View {
     private func toggleLock() {
         month.isLocked.toggle()
         month.markUpdated()
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+            try AppDataService.refreshForecast(in: modelContext)
+        } catch {
+            print("Lock toggle failed: \(error)")
+        }
     }
 
     private func recalculate() {

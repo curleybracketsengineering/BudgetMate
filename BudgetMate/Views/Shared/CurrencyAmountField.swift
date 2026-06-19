@@ -10,14 +10,21 @@ struct CurrencyAmountField: View {
     }
 
     var body: some View {
-        HStack(spacing: 4) {
-            Text(currency.symbol)
-                .foregroundStyle(.secondary)
-            TextField(placeholder, text: $text)
-                .multilineTextAlignment(.trailing)
-                .textFieldStyle(.roundedBorder)
-                .frame(minWidth: 80, maxWidth: 120)
-                .onSubmit { onCommit?() }
-        }
+        TextField(placeholder, text: $text)
+            .multilineTextAlignment(.trailing)
+            .textFieldStyle(.roundedBorder)
+            .frame(minWidth: 100, maxWidth: 140)
+            .overlay(alignment: .leading) {
+                Text(currency.symbol)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 6)
+                    .allowsHitTesting(false)
+            }
+            .padding(.leading, leadingPadding)
+            .onSubmit { onCommit?() }
+    }
+
+    private var leadingPadding: CGFloat {
+        currency.symbol.count > 2 ? 28 : 18
     }
 }

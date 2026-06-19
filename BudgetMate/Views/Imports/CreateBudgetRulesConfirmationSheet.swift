@@ -103,8 +103,8 @@ struct CreateBudgetRulesConfirmationSheet: View {
                 Text(suggestion.name)
                     .font(.body.weight(.medium))
                     .lineLimit(2)
-                if !suggestion.category.isEmpty {
-                    Text(suggestion.category)
+                if !suggestion.suggestedSubCategoryTitle.isEmpty {
+                    Text(suggestion.suggestedSubCategoryTitle)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

@@ -13,7 +13,7 @@ struct OneOffRuleFormView: View {
     @State private var name = ""
     @State private var amountText = ""
     @State private var type: BudgetType = .expense
-    @State private var category = ""
+    @State private var subCategory: BudgetRuleSubCategory?
     @State private var linkedAccountId: UUID?
     @State private var confidence: ConfidenceLevel = .estimated
     @State private var commitment: CommitmentType = .known
@@ -40,7 +40,12 @@ struct OneOffRuleFormView: View {
                         Text(BudgetType.expense.displayName).tag(BudgetType.expense)
                         Text(BudgetType.saving.displayName).tag(BudgetType.saving)
                     }
-                    TextField("Category", text: $category)
+                    if let orderGroup = BudgetRuleService.OrderGroup.forPicker(from: type) {
+                        BudgetRuleSubCategoryPicker(
+                            selectedSubCategory: $subCategory,
+                            orderGroup: orderGroup
+                        )
+                    }
                     AccountPicker(linkedAccountId: $linkedAccountId)
                 }
 
@@ -94,7 +99,7 @@ struct OneOffRuleFormView: View {
             name: name,
             amountText: amountText,
             type: type,
-            category: category,
+            subCategory: subCategory,
             cycle: .oneOff,
             startDate: PlanningCalendar.firstDayOfMonth(year: year, month: month),
             hasEndDate: false,

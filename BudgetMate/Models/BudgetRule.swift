@@ -6,6 +6,7 @@ final class BudgetRule {
     var id: UUID = UUID()
     var name: String = ""
     var typeRaw: String = BudgetType.expense.rawValue
+    /// Legacy field — read only during one-time sub-category migration, then cleared.
     var category: String = ""
     var amountMinorUnits: Int = 0
     /// Per-month impact from import analysis, or cycle-derived when created/edited manually. Zero uses cycle calculation.
@@ -28,6 +29,7 @@ final class BudgetRule {
     var showIndividuallyInPlan: Bool = false
     /// Sort order within the Incoming or Outgoing group in Budget Rules (and grouped plan tiles).
     var displayOrder: Int = 0
+    var subCategory: BudgetRuleSubCategory?
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
     var deviceId: String = ""

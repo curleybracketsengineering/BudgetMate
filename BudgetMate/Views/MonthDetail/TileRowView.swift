@@ -29,9 +29,9 @@ struct TileRowView: View {
                         Text("·")
                         Text(accountName)
                     }
-                    if !tile.category.isEmpty {
+                    if let title = tile.subCategory?.title, !title.isEmpty {
                         Text("·")
-                        Text(tile.category)
+                        Text(title)
                     }
                 }
                 .font(.caption)

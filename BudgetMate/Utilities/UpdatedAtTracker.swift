@@ -94,3 +94,29 @@ extension BankAccount {
         deviceId = UpdatedAtTracker.currentDeviceId
     }
 }
+
+extension Holiday {
+    func markCreated() {
+        createdAt = Date()
+        updatedAt = Date()
+        deviceId = UpdatedAtTracker.currentDeviceId
+    }
+
+    func markUpdated() {
+        updatedAt = Date()
+        deviceId = UpdatedAtTracker.currentDeviceId
+    }
+}
+
+extension HolidayActivity {
+    func markCreated() {
+        createdAt = Date()
+        updatedAt = Date()
+        deviceId = UpdatedAtTracker.currentDeviceId
+    }
+
+    func markUpdated() {
+        updatedAt = Date()
+        deviceId = UpdatedAtTracker.currentDeviceId
+    }
+}
