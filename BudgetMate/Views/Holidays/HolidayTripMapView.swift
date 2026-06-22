@@ -61,7 +61,7 @@ struct HolidayTripMapView: View {
                 ContentUnavailableView(
                     "No locations yet",
                     systemImage: "map",
-                    description: Text("Add a location to hotel or flight activities to see your route.")
+                    description: Text("Add locations to transport, hotel, or flight activities to see your route.")
                 )
                 .frame(maxWidth: .infinity, minHeight: 180)
             } else {
@@ -81,7 +81,7 @@ struct HolidayTripMapView: View {
         let signature = holiday.activities
             .sorted { $0.sortOrder < $1.sortOrder }
             .map {
-                "\($0.id.uuidString)|\($0.locationName)|\($0.countryName)|\($0.name)|\($0.sortOrder)|\($0.plannedStartDate?.timeIntervalSince1970 ?? 0)|\($0.plannedEndDate?.timeIntervalSince1970 ?? 0)|\($0.nights)|\($0.estimateSourceRaw)"
+                "\($0.id.uuidString)|\($0.fromLocationName)|\($0.locationName)|\($0.countryName)|\($0.name)|\($0.kindRaw)|\($0.sortOrder)|\($0.plannedStartDate?.timeIntervalSince1970 ?? 0)|\($0.plannedEndDate?.timeIntervalSince1970 ?? 0)|\($0.nights)|\($0.estimateSourceRaw)"
             }
             .joined(separator: ";")
         return "\(holiday.id.uuidString)|\(holiday.countryName)|\(holiday.plannedStartDate?.timeIntervalSince1970 ?? 0)|\(signature)"
@@ -213,7 +213,7 @@ struct HolidayTripMapView: View {
                 pasteTargetTripDay: $pasteTargetTripDay,
                 onKeyboardFocus: onKeyboardFocus,
                 includedActivityIDs: Set(stops.map(\.activityID)),
-                stopLookup: Dictionary(uniqueKeysWithValues: stops.map { ($0.activityID, $0) }),
+                stopLookup: stopLookupByActivityID(from: stops),
                 highlightedTripDay: tripDayCount != nil ? selectedTripDay : nil
             )
         }
@@ -327,5 +327,21 @@ struct HolidayTripMapView: View {
 
     private func clampSpan(_ span: Double) -> Double {
         min(max(span, 0.02), 120)
+    }
+
+    private func stopLookupByActivityID(
+        from stops: [HolidayItineraryService.MapStop]
+    ) -> [UUID: HolidayItineraryService.MapStop] {
+        var lookup: [UUID: HolidayItineraryService.MapStop] = [:]
+        for stop in stops {
+            if let existing = lookup[stop.activityID] {
+                if stop.role == .destination {
+                    lookup[stop.activityID] = stop
+                }
+            } else {
+                lookup[stop.activityID] = stop
+            }
+        }
+        return lookup
     }
 }

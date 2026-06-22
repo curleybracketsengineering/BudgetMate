@@ -2,10 +2,16 @@ import CoreLocation
 import Foundation
 
 enum HolidayItineraryService {
+    enum MapStopRole: String {
+        case origin
+        case destination
+    }
+
     struct MapStop: Identifiable {
-        let id: UUID
+        let id: String
         let order: Int
         let activityID: UUID
+        let role: MapStopRole
         let name: String
         let locationName: String
         let countryName: String
@@ -16,6 +22,8 @@ enum HolidayItineraryService {
         let tripDayEnd: Int?
         var latitude: Double
         var longitude: Double
+        /// When true, resolved coordinates are written back to the activity's main geocode cache.
+        let persistsGeocodeOnActivity: Bool
 
         var coordinate: CLLocationCoordinate2D? {
             guard latitude != 0 || longitude != 0 else { return nil }
@@ -28,20 +36,26 @@ enum HolidayItineraryService {
         }
     }
 
-    static func resolvedLocationName(activity: HolidayActivity, holiday: Holiday) -> String {
+    static func resolvedDestinationName(activity: HolidayActivity, holiday: Holiday) -> String {
         let stored = activity.locationName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !stored.isEmpty { return stored }
 
-        let inferred = HolidayLocationParser.infer(from: activity.name, kind: activity.kind)
+        let inferred = HolidayLocationParser.inferDestination(from: activity.name, kind: activity.kind)
         if !inferred.isEmpty { return inferred }
 
-        if activity.kind == .flights, !holiday.origin.isEmpty {
-            return holiday.origin
+        if activity.kind == .hotels || activity.kind == .carHire {
+            let holidayDestination = holiday.destination.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !holidayDestination.isEmpty { return holidayDestination }
         }
-        if !holiday.destination.isEmpty {
-            return holiday.destination
-        }
+
         return ""
+    }
+
+    static func resolvedOriginName(activity: HolidayActivity) -> String {
+        let stored = activity.fromLocationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !stored.isEmpty { return stored }
+
+        return HolidayLocationParser.inferOrigin(from: activity.name, kind: activity.kind)
     }
 
     static func resolvedCountryName(activity: HolidayActivity, holiday: Holiday) -> String {
@@ -51,7 +65,7 @@ enum HolidayItineraryService {
         let holidayCountry = holiday.countryName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !holidayCountry.isEmpty { return holidayCountry }
 
-        return holiday.destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ""
     }
 
     static func mapStops(for holiday: Holiday) -> [MapStop] {
@@ -61,23 +75,17 @@ enum HolidayItineraryService {
         var previousLocation: String?
 
         for activity in sorted {
-            let locationName = resolvedLocationName(activity: activity, holiday: holiday)
-            guard !locationName.isEmpty else { continue }
-            guard activity.kind.showsOnTripMap || !activity.locationName.isEmpty else { continue }
+            let destinationName = resolvedDestinationName(activity: activity, holiday: holiday)
+            let originName = activity.kind.hasFromToFields
+                ? resolvedOriginName(activity: activity)
+                : ""
+            let hasExplicitLocation = !activity.locationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !activity.fromLocationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
-            if let previousLocation,
-               previousLocation.compare(locationName, options: .caseInsensitive) == .orderedSame {
-                continue
-            }
+            guard activity.kind.showsOnTripMap || hasExplicitLocation else { continue }
+            guard !destinationName.isEmpty || !originName.isEmpty else { continue }
 
-            order += 1
             let countryName = resolvedCountryName(activity: activity, holiday: holiday)
-            let searchQuery = HolidayGeocodingService.searchQuery(
-                locationName: locationName,
-                countryName: countryName
-            )
-            let hasValidCachedCoordinate = activity.hasStoredCoordinate
-                && activity.geocodedSearchQuery == searchQuery
             let startDate = HolidayService.resolvedStartDate(activity: activity, holiday: holiday)
             let endDate = HolidayService.resolvedEndDate(activity: activity, holiday: holiday)
             let dayRange = tripDayRange(
@@ -86,24 +94,44 @@ enum HolidayItineraryService {
                 tripStart: holiday.plannedStartDate
             )
 
-            stops.append(
-                MapStop(
-                    id: activity.id,
-                    order: order,
-                    activityID: activity.id,
-                    name: activity.name,
-                    locationName: locationName,
-                    countryName: countryName,
-                    kind: activity.kind,
-                    startDate: startDate,
-                    endDate: endDate,
-                    tripDayStart: dayRange?.start,
-                    tripDayEnd: dayRange?.end,
-                    latitude: hasValidCachedCoordinate ? activity.latitude : 0,
-                    longitude: hasValidCachedCoordinate ? activity.longitude : 0
+            if activity.kind.hasFromToFields,
+               !originName.isEmpty,
+               previousLocation?.compare(originName, options: .caseInsensitive) != .orderedSame {
+                order += 1
+                stops.append(
+                    makeStop(
+                        activity: activity,
+                        role: .origin,
+                        order: order,
+                        locationName: originName,
+                        countryName: countryName,
+                        startDate: startDate,
+                        endDate: endDate,
+                        dayRange: dayRange,
+                        persistsGeocodeOnActivity: false
+                    )
                 )
-            )
-            previousLocation = locationName
+                previousLocation = originName
+            }
+
+            if !destinationName.isEmpty,
+               previousLocation?.compare(destinationName, options: .caseInsensitive) != .orderedSame {
+                order += 1
+                stops.append(
+                    makeStop(
+                        activity: activity,
+                        role: .destination,
+                        order: order,
+                        locationName: destinationName,
+                        countryName: countryName,
+                        startDate: startDate,
+                        endDate: endDate,
+                        dayRange: dayRange,
+                        persistsGeocodeOnActivity: true
+                    )
+                )
+                previousLocation = destinationName
+            }
         }
 
         return stops
@@ -142,6 +170,44 @@ enum HolidayItineraryService {
 
     static func hasMappableContent(for holiday: Holiday) -> Bool {
         !mapStops(for: holiday).isEmpty
+    }
+
+    private static func makeStop(
+        activity: HolidayActivity,
+        role: MapStopRole,
+        order: Int,
+        locationName: String,
+        countryName: String,
+        startDate: Date?,
+        endDate: Date?,
+        dayRange: (start: Int, end: Int)?,
+        persistsGeocodeOnActivity: Bool
+    ) -> MapStop {
+        let searchQuery = HolidayGeocodingService.searchQuery(
+            locationName: locationName,
+            countryName: countryName
+        )
+        let hasValidCachedCoordinate = persistsGeocodeOnActivity
+            && activity.hasStoredCoordinate
+            && activity.geocodedSearchQuery == searchQuery
+
+        return MapStop(
+            id: "\(activity.id.uuidString)-\(role.rawValue)",
+            order: order,
+            activityID: activity.id,
+            role: role,
+            name: activity.name,
+            locationName: locationName,
+            countryName: countryName,
+            kind: activity.kind,
+            startDate: startDate,
+            endDate: endDate,
+            tripDayStart: dayRange?.start,
+            tripDayEnd: dayRange?.end,
+            latitude: hasValidCachedCoordinate ? activity.latitude : 0,
+            longitude: hasValidCachedCoordinate ? activity.longitude : 0,
+            persistsGeocodeOnActivity: persistsGeocodeOnActivity
+        )
     }
 
     private static func tripDayRange(

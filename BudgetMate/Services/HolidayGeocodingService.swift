@@ -29,7 +29,8 @@ enum HolidayGeocodingService {
                     updatedStop.latitude = coordinate.latitude
                     updatedStop.longitude = coordinate.longitude
 
-                    if let activity = activities.first(where: { $0.id == stop.activityID }) {
+                    if stop.persistsGeocodeOnActivity,
+                       let activity = activities.first(where: { $0.id == stop.activityID }) {
                         activity.latitude = coordinate.latitude
                         activity.longitude = coordinate.longitude
                         activity.geocodedSearchQuery = query
@@ -46,6 +47,14 @@ enum HolidayGeocodingService {
         }
 
         return resolvedStops
+    }
+
+    static func coordinate(
+        locationName: String,
+        countryName: String
+    ) async -> CLLocationCoordinate2D? {
+        let query = searchQuery(locationName: locationName, countryName: countryName)
+        return await geocode(searchQuery: query)
     }
 
     private static func geocode(searchQuery: String) async -> CLLocationCoordinate2D? {

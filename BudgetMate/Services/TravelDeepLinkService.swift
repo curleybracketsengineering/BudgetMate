@@ -49,6 +49,29 @@ enum TravelDeepLinkService {
         }
     }
 
+    static func googleDrivingDirectionsURL(
+        origin: String,
+        destination: String,
+        countryName: String = ""
+    ) -> URL? {
+        let originTrimmed = origin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let destinationTrimmed = destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !originTrimmed.isEmpty, !destinationTrimmed.isEmpty else { return nil }
+
+        let country = countryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let originQuery = qualifiedPlaceName(originTrimmed, countryName: country)
+        let destinationQuery = qualifiedPlaceName(destinationTrimmed, countryName: country)
+
+        var components = URLComponents(string: "https://www.google.com/maps/dir/")
+        components?.queryItems = [
+            URLQueryItem(name: "api", value: "1"),
+            URLQueryItem(name: "origin", value: originQuery),
+            URLQueryItem(name: "destination", value: destinationQuery),
+            URLQueryItem(name: "travelmode", value: "driving"),
+        ]
+        return components?.url
+    }
+
     static func carHireSearchURL(
         provider: TravelSearchProvider,
         destination: String,
@@ -124,6 +147,11 @@ enum TravelDeepLinkService {
             return URL(string: "https://www.kayak.co.uk/cars/\(slug)")
         }
         return URL(string: "https://www.kayak.co.uk/cars/\(slug)/\(pickup)/\(dropoff)")
+    }
+
+    private static func qualifiedPlaceName(_ place: String, countryName: String) -> String {
+        guard !countryName.isEmpty else { return place }
+        return "\(place), \(countryName)"
     }
 
     private static func slugify(_ text: String) -> String {

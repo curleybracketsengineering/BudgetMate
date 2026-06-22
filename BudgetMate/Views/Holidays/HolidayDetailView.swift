@@ -21,12 +21,15 @@ struct HolidayDetailView: View {
     @State private var commitError: String?
     @State private var showingCommitError = false
     @State private var activityListLayout: HolidayActivityListLayout = .byType
-    @State private var detailPage: HolidayDetailPage = .plan
     @State private var isInteractingWithMap = false
     @State private var copiedActivityID: UUID?
     @State private var selectedActivityID: UUID?
     @State private var pasteTargetDate: Date?
     @State private var pasteTargetTripDay: Int?
+    @State private var tripDayScrollAnchors: [TripDayScrollAnchor] = []
+    @State private var tripDayScrollPosition: TripDayScrollAnchor?
+    @State private var pendingTripDayScroll: Int?
+    @State private var pinnedTopControlsHeight: CGFloat = 0
     @FocusState private var holidayKeyboardFocused: Bool
 
     private var currency: AppCurrency { settingsList.first?.currency ?? .GBP }
@@ -42,26 +45,64 @@ struct HolidayDetailView: View {
         HolidayItineraryService.hasMappableContent(for: holiday)
     }
 
+    private var availableActivityListLayouts: [HolidayActivityListLayout] {
+        HolidayActivityListLayout.allCases.filter { layout in
+            layout != .map || showsMapPage
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 headerSection
-                if showsMapPage {
-                    detailPagePicker
-                }
-                switch detailPage {
-                case .plan:
-                    planContent
-                case .map:
+                if activityListLayout == .map {
                     mapContent
+                } else {
+                    planContent
                 }
             }
             .padding()
         }
-        .scrollDisabled(isInteractingWithMap && detailPage == .map)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if showsPinnedTopControls {
+                pinnedTopControls
+            }
+        }
+        .scrollPosition(id: $tripDayScrollPosition, anchor: .top)
+        .onScrollTargetVisibilityChange(idType: TripDayScrollAnchor.self) { visibleIDs in
+            guard let topmost = visibleIDs.first else { return }
+            tripDayScrollPosition = topmost
+        }
+        .overlay {
+            if !tripDayScrollAnchors.isEmpty {
+                DragAutoScrollOverlay(
+                    scrollIDs: tripDayScrollAnchors,
+                    scrollPosition: $tripDayScrollPosition,
+                    excludedTopHeight: pinnedTopControlsHeight
+                )
+            }
+        }
+        .onPreferenceChange(TripDayScrollAnchorsKey.self) { anchors in
+            tripDayScrollAnchors = anchors
+            scrollToPendingTripDayIfNeeded(using: anchors)
+        }
+        .onChange(of: activityListLayout) { _, layout in
+            if layout != .byDay {
+                tripDayScrollAnchors = []
+                pendingTripDayScroll = nil
+            } else {
+                scrollToPendingTripDayIfNeeded(using: tripDayScrollAnchors)
+            }
+        }
+        .scrollDisabled(isInteractingWithMap && activityListLayout == .map)
         .onChange(of: showsMapPage) { _, hasMap in
-            if !hasMap {
-                detailPage = .plan
+            if !hasMap, activityListLayout == .map {
+                activityListLayout = .byType
+            }
+        }
+        .onChange(of: showsPinnedTopControls) { _, shows in
+            if !shows {
+                pinnedTopControlsHeight = 0
             }
         }
         .holidayActivityKeyboardShortcuts(
@@ -152,16 +193,32 @@ struct HolidayDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var showsPinnedTopControls: Bool {
+        !holiday.activities.isEmpty || showsMapPage
+    }
+
     @ViewBuilder
-    private var detailPagePicker: some View {
-        Picker("View", selection: $detailPage) {
-            ForEach(HolidayDetailPage.allCases) { page in
-                Label(page.title, systemImage: page.systemImage)
-                    .tag(page)
+    private var pinnedTopControls: some View {
+        VStack(spacing: 0) {
+            if showsPinnedTopControls {
+                Picker("Layout", selection: $activityListLayout) {
+                    ForEach(availableActivityListLayouts) { layout in
+                        Text(layout.title).tag(layout)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                Divider()
             }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
+        .background(.background)
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.height
+        } action: { height in
+            pinnedTopControlsHeight = height
+        }
     }
 
     @ViewBuilder
@@ -224,16 +281,6 @@ struct HolidayDetailView: View {
                 }
             }
 
-            if !holiday.activities.isEmpty {
-                Picker("Layout", selection: $activityListLayout) {
-                    ForEach(HolidayActivityListLayout.allCases) { layout in
-                        Text(layout.title).tag(layout)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-
             if holiday.activities.isEmpty {
                 ContentUnavailableView(
                     "No activities",
@@ -251,8 +298,6 @@ struct HolidayDetailView: View {
                             activities: holiday.sortedActivities.filter { $0.kind == kind }
                         )
                     }
-                case .byDate:
-                    chronologicalActivityList
                 case .byDay:
                     HolidayTripDayScheduleView(
                         holiday: holiday,
@@ -270,33 +315,14 @@ struct HolidayDetailView: View {
                         copiedActivityID: $copiedActivityID,
                         selectedActivityID: $selectedActivityID,
                         pasteTargetDate: $pasteTargetDate,
-                        onKeyboardFocus: { holidayKeyboardFocused = true }
+                        onKeyboardFocus: { holidayKeyboardFocused = true },
+                        onOpenDaySchedule: openDaySchedule
                     ) { activity in
                         editingActivity = activity
                     }
+                case .map:
+                    EmptyView()
                 }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var chronologicalActivityList: some View {
-        let activities = HolidayService.chronologicallySortedActivities(for: holiday)
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(activities, id: \.id) { activity in
-                activityRow(activity, leading: .date)
-                if activity.id != activities.last?.id {
-                    Divider()
-                }
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-        .contextMenu {
-            Button {
-                addActivityContext = HolidayAddActivityContext()
-            } label: {
-                Label("Add activity", systemImage: "plus")
             }
         }
     }
@@ -304,7 +330,6 @@ struct HolidayDetailView: View {
     private enum ActivityRowLeading {
         case none
         case kind
-        case date
     }
 
     @ViewBuilder
@@ -340,12 +365,13 @@ struct HolidayDetailView: View {
     }
 
     @ViewBuilder
-    private func activityRow(_ activity: HolidayActivity, leading: ActivityRowLeading) -> some View {
+    private func activityRow(
+        _ activity: HolidayActivity,
+        leading: ActivityRowLeading
+    ) -> some View {
         let dateLabel = HolidayService.activityDateRangeLabel(activity: activity, holiday: holiday)
-        let compactDateParts = HolidayService.activityCompactDateParts(activity: activity, holiday: holiday)
         let plannedMonth = HolidayService.resolvedPlannedMonth(activity: activity, holiday: holiday)
-        let showsInlineDate = leading != .date
-        let expandsEditableFields = leading != .date
+        let routeSummary = HolidayTravelEstimateService.routeSummaryLabel(activity: activity, holiday: holiday)
         let isSelected = selectedActivityID == activity.id
 
         HStack(alignment: .top, spacing: 10) {
@@ -355,8 +381,6 @@ struct HolidayDetailView: View {
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .frame(width: 20)
-            case .date:
-                activityDateColumn(compactDateParts: compactDateParts, plannedMonth: plannedMonth)
             case .none:
                 EmptyView()
             }
@@ -367,7 +391,6 @@ struct HolidayDetailView: View {
                         placeholder: "Name",
                         font: .body,
                         weight: .medium,
-                        expandsHorizontally: expandsEditableFields,
                         onCommit: { newName in
                             guard !newName.isEmpty else { return }
                             activity.name = newName
@@ -383,22 +406,32 @@ struct HolidayDetailView: View {
                             .foregroundStyle(.orange)
                     }
                 }
-                HStack(spacing: 6) {
-                    if showsInlineDate {
-                        if let dateLabel {
-                            Label(dateLabel, systemImage: "calendar")
-                        } else if let plannedMonth {
-                            Text(HolidayService.monthTitle(year: plannedMonth.year, month: plannedMonth.month))
+                if routeSummary != nil || activity.kind == .driving {
+                    HStack(spacing: 6) {
+                        if let routeSummary {
+                            Text(routeSummary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if activity.kind == .driving {
+                            HolidayDrivingRouteButton(activity: activity, holiday: holiday)
                         }
                     }
-                    if activity.kind == .hotels, activity.nights > 0 {
-                        if showsInlineDate && (dateLabel != nil || plannedMonth != nil) {
+                }
+                HStack(spacing: 6) {
+                    if let dateLabel {
+                        Label(dateLabel, systemImage: "calendar")
+                    } else if let plannedMonth {
+                        Text(HolidayService.monthTitle(year: plannedMonth.year, month: plannedMonth.month))
+                    }
+                    if activity.kind.supportsMultiDayDuration, activity.nights > 0 {
+                        if dateLabel != nil || plannedMonth != nil {
                             Text("·")
                         }
-                        Text(activity.nights == 1 ? "1 night" : "\(activity.nights) nights")
+                        Text(activity.kind.durationLabel(count: activity.nights))
                     }
                     if let note = activity.estimateNote.nilIfEmpty {
-                        if showsInlineDate && (dateLabel != nil || plannedMonth != nil || (activity.kind == .hotels && activity.nights > 0)) {
+                        if dateLabel != nil || plannedMonth != nil || (activity.kind.supportsMultiDayDuration && activity.nights > 0) {
                             Text("·")
                         }
                         Text(note)
@@ -413,7 +446,6 @@ struct HolidayDetailView: View {
                     isSecondary: true,
                     lineLimit: 3,
                     multiline: true,
-                    expandsHorizontally: expandsEditableFields,
                     onCommit: { newNotes in
                         activity.notes = newNotes
                         persistActivityChange(activity)
@@ -447,14 +479,10 @@ struct HolidayDetailView: View {
         .padding(.vertical, 8)
         .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
         .contentShape(Rectangle())
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                selectActivity(activity)
-            }
+        .onActivitySelectionTap(
+            onSelect: { selectActivity(activity) },
+            onEdit: { editingActivity = activity }
         )
-        .onTapGesture(count: 2) {
-            editingActivity = activity
-        }
         .contextMenu {
             activityRowContextMenu(for: activity)
         }
@@ -493,33 +521,6 @@ struct HolidayDetailView: View {
         } label: {
             Label("Delete", systemImage: "trash")
         }
-    }
-
-    @ViewBuilder
-    private func activityDateColumn(
-        compactDateParts: HolidayService.ActivityCompactDateParts?,
-        plannedMonth: (year: Int, month: Int)?
-    ) -> some View {
-        Group {
-            if let compactDateParts {
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text(compactDateParts.topLine)
-                        .font(.caption.weight(.semibold))
-                    Text(compactDateParts.bottomLine)
-                        .font(.caption2)
-                }
-            } else if let plannedMonth {
-                Text(HolidayService.monthTitle(year: plannedMonth.year, month: plannedMonth.month))
-                    .font(.caption.weight(.medium))
-                    .multilineTextAlignment(.trailing)
-            } else {
-                Text("—")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .foregroundStyle(.secondary)
-        .frame(width: 52, alignment: .trailing)
     }
 
     @ViewBuilder
@@ -691,7 +692,7 @@ struct HolidayDetailView: View {
     }
 
     private var effectivePasteTargetDate: Date? {
-        if (activityListLayout == .byDay || detailPage == .map), let pasteTargetTripDay,
+        if (activityListLayout == .byDay || activityListLayout == .map), let pasteTargetTripDay,
            let tripStart = holiday.plannedStartDate {
             return HolidayItineraryService.date(forTripDay: pasteTargetTripDay, tripStart: tripStart)
         }
@@ -703,6 +704,27 @@ struct HolidayDetailView: View {
             return nil
         }
         return HolidayService.resolvedStartDate(activity: activity, holiday: holiday)
+    }
+
+    private func openDaySchedule(for date: Date) {
+        let dayStart = Calendar.current.startOfDay(for: date)
+        pasteTargetDate = dayStart
+        if let tripStart = holiday.plannedStartDate {
+            let tripDay = HolidayItineraryService.tripDay(for: dayStart, tripStart: tripStart)
+            pasteTargetTripDay = tripDay
+            pendingTripDayScroll = tripDay
+        }
+        activityListLayout = .byDay
+        holidayKeyboardFocused = true
+        scrollToPendingTripDayIfNeeded(using: tripDayScrollAnchors)
+    }
+
+    private func scrollToPendingTripDayIfNeeded(using anchors: [TripDayScrollAnchor]) {
+        guard let tripDay = pendingTripDayScroll else { return }
+        let anchor = TripDayScrollAnchor.day(tripDay)
+        guard anchors.contains(anchor) else { return }
+        tripDayScrollPosition = anchor
+        pendingTripDayScroll = nil
     }
 
     private func selectActivity(_ activity: HolidayActivity) {
@@ -728,7 +750,7 @@ struct HolidayDetailView: View {
     private func pasteFromKeyboard() {
         guard copiedActivity() != nil else { return }
 
-        if (activityListLayout == .byDay || detailPage == .map), let pasteTargetTripDay {
+        if (activityListLayout == .byDay || activityListLayout == .map), let pasteTargetTripDay {
             pasteActivity(toTripDay: pasteTargetTripDay)
             return
         }

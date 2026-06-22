@@ -107,7 +107,7 @@ enum HolidayService {
             }
             if let start = activity.plannedStartDate {
                 let startDay = calendar.startOfDay(for: start)
-                if activity.kind == .hotels, activity.nights > 1 {
+                if activity.kind.supportsMultiDayDuration, activity.nights > 1 {
                     return calendar.date(byAdding: .day, value: activity.nights - 1, to: startDay) ?? startDay
                 }
                 return startDay
@@ -123,7 +123,7 @@ enum HolidayService {
     }
 
     static func activitySpanDays(activity: HolidayActivity, holiday: Holiday) -> Int {
-        if activity.kind == .hotels, activity.nights > 0 {
+        if activity.kind.supportsMultiDayDuration, activity.nights > 0 {
             return activity.nights
         }
         guard let start = resolvedStartDate(activity: activity, holiday: holiday) else { return 1 }
@@ -146,73 +146,21 @@ enum HolidayService {
         return HolidayItineraryService.tripDay(for: start, tripStart: tripStart) == tripDay
     }
 
-    static func hotelStayNightLabel(
+    static func tripDayDurationLabel(
         activity: HolidayActivity,
         holiday: Holiday,
         tripDay: Int
     ) -> String? {
-        guard activity.kind == .hotels,
+        guard activity.kind.supportsMultiDayDuration,
               let tripStart = holiday.plannedStartDate,
               let start = resolvedStartDate(activity: activity, holiday: holiday) else {
             return nil
         }
 
         let startTripDay = HolidayItineraryService.tripDay(for: start, tripStart: tripStart)
-        let totalNights = activitySpanDays(activity: activity, holiday: holiday)
-        let nightNumber = tripDay - startTripDay + 1
-        guard nightNumber >= 1, nightNumber <= totalNights else { return nil }
-
-        if nightNumber == 1 {
-            return totalNights == 1 ? "1 night" : "\(totalNights) nights"
-        }
-        return "Night \(nightNumber) of \(totalNights)"
-    }
-
-    struct ActivityCompactDateParts {
-        let topLine: String
-        let bottomLine: String
-    }
-
-    private static let compactDayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("d")
-        formatter.timeStyle = .none
-        return formatter
-    }()
-
-    private static let compactMonthFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("MMM")
-        formatter.timeStyle = .none
-        return formatter
-    }()
-
-    static func activityCompactDateParts(
-        activity: HolidayActivity,
-        holiday: Holiday
-    ) -> ActivityCompactDateParts? {
-        guard let start = resolvedStartDate(activity: activity, holiday: holiday) else { return nil }
-        let end = resolvedEndDate(activity: activity, holiday: holiday) ?? start
-        let calendar = Calendar.current
-        let startDay = calendar.startOfDay(for: start)
-        let endDay = calendar.startOfDay(for: end)
-
-        let topLine: String
-        if endDay > startDay {
-            topLine = "\(compactDayFormatter.string(from: startDay))–\(compactDayFormatter.string(from: endDay))"
-        } else {
-            topLine = compactDayFormatter.string(from: startDay)
-        }
-
-        return ActivityCompactDateParts(
-            topLine: topLine,
-            bottomLine: compactMonthFormatter.string(from: startDay)
-        )
-    }
-
-    static func activityCompactDateLabel(activity: HolidayActivity, holiday: Holiday) -> String? {
-        guard let parts = activityCompactDateParts(activity: activity, holiday: holiday) else { return nil }
-        return "\(parts.topLine) \(parts.bottomLine)"
+        let totalDays = activitySpanDays(activity: activity, holiday: holiday)
+        let dayNumber = tripDay - startTripDay + 1
+        return activity.kind.tripDayDurationLabel(dayNumber: dayNumber, total: totalDays)
     }
 
     private static func usesExplicitActivityDates(_ activity: HolidayActivity) -> Bool {
@@ -266,8 +214,7 @@ enum HolidayService {
             let sameYear = calendar.component(.year, from: startDay) == calendar.component(.year, from: endDay)
             if sameYear {
                 let startFormatter = DateFormatter()
-                startFormatter.setLocalizedDateFormatFromTemplate("d MMM")
-                startFormatter.timeStyle = .none
+                startFormatter.dateFormat = "d MMM"
                 return "\(startFormatter.string(from: startDay)) – \(formatter.string(from: endDay))"
             }
             return "\(formatter.string(from: startDay)) – \(formatter.string(from: endDay))"
@@ -646,7 +593,7 @@ enum HolidayService {
                 starts[activity.id] = startDay
                 if let end = activity.plannedEndDate {
                     ends[activity.id] = calendar.startOfDay(for: end)
-                } else if activity.kind == .hotels, activity.nights > 1 {
+                } else if activity.kind.supportsMultiDayDuration, activity.nights > 1 {
                     ends[activity.id] = calendar.date(byAdding: .day, value: activity.nights - 1, to: startDay) ?? startDay
                 } else {
                     ends[activity.id] = startDay
@@ -845,6 +792,7 @@ enum HolidayService {
             activity.estimateNote = draft.estimateNote
             activity.estimateSource = .aiSuggested
             activity.locationName = draft.locationName.trimmingCharacters(in: .whitespacesAndNewlines)
+            activity.fromLocationName = draft.fromLocationName.trimmingCharacters(in: .whitespacesAndNewlines)
             activity.nights = draft.nights
             activity.holiday = holiday
             context.insert(activity)
@@ -901,7 +849,11 @@ enum HolidayService {
         copy.estimateNote = source.estimateNote
         copy.estimateSource = .manual
         copy.locationName = source.locationName
+        copy.fromLocationName = source.fromLocationName
         copy.countryName = source.countryName
+        copy.estimatedDistanceKm = source.estimatedDistanceKm
+        copy.estimatedDurationMinutes = source.estimatedDurationMinutes
+        copy.travelEstimatesAreManual = source.travelEstimatesAreManual
         copy.latitude = source.latitude
         copy.longitude = source.longitude
         copy.geocodedSearchQuery = source.geocodedSearchQuery

@@ -169,7 +169,7 @@ struct HolidayDescriptionImportView: View {
                                 }
                                 if draft.nights > 0 {
                                     Text("·")
-                                    Text(draft.nights == 1 ? "1 night" : "\(draft.nights) nights")
+                                    Text(draft.kind.durationLabel(count: draft.nights))
                                 }
                                 if !draft.amountText.isEmpty {
                                     Text("·")
@@ -189,9 +189,14 @@ struct HolidayDescriptionImportView: View {
                             }
                         }
                         TextField("Name", text: $draft.name)
-                        TextField("Location", text: $draft.locationName)
-                        if draft.nights > 0 || draft.kind == .hotels {
-                            Stepper(draft.nights == 1 ? "1 night" : "\(draft.nights) nights", value: $draft.nights, in: 0...60)
+                        if draft.kind.hasFromToFields {
+                            TextField("From", text: $draft.fromLocationName)
+                            TextField("To", text: $draft.locationName)
+                        } else {
+                            TextField("Location", text: $draft.locationName)
+                        }
+                        if draft.nights > 0 || draft.kind.supportsMultiDayDuration {
+                            Stepper(draft.kind.durationLabel(count: draft.nights), value: $draft.nights, in: 0...60)
                         }
                         TextField("Amount", text: $draft.amountText)
                         if !draft.estimateNote.isEmpty {

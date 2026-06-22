@@ -12,7 +12,9 @@ final class HolidayActivity {
     var plannedMonth: Int = 0
     var plannedStartDate: Date?
     var plannedEndDate: Date?
-    /// City, town, or airport shown on the trip map. Empty means infer from the activity name.
+    /// Departure city or place for transport legs. Empty means infer from the activity name when possible.
+    var fromLocationName: String = ""
+    /// Arrival city, town, or airport shown on the trip map. Empty means infer from the activity name.
     var locationName: String = ""
     /// Country used to disambiguate map geocoding. Empty inherits the trip default.
     var countryName: String = ""
@@ -21,6 +23,12 @@ final class HolidayActivity {
     var longitude: Double = 0
     /// Search query used for the cached coordinate. Cleared when location or country changes.
     var geocodedSearchQuery: String = ""
+    /// Estimated route distance in kilometres. 0 means unset.
+    var estimatedDistanceKm: Double = 0
+    /// Estimated travel time in minutes (drive or flight). 0 means unset.
+    var estimatedDurationMinutes: Int = 0
+    /// When true, from/to changes do not overwrite distance or duration.
+    var travelEstimatesAreManual: Bool = false
     /// Nights at this stop. 0 means same-day or unknown (e.g. a flight leg).
     var nights: Int = 0
     var linkedAccountId: UUID?

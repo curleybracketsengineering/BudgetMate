@@ -24,10 +24,10 @@ struct ExtractedHolidayItem {
     @Guide(description: "Short label, e.g. Shamwari — 3 nights or Qatar open-jaw business flights.")
     var name: String
 
-    @Guide(description: "Exactly one of: flights, hotels, eatingOut, trips, carHire, insurance, other.")
+    @Guide(description: "Exactly one of: flights, hotels, eatingOut, trips, carHire, driving, transfer, boat, cycling, insurance, other.")
     var kind: String
 
-    @Guide(description: "Nights at this stop if applicable, otherwise 0.")
+    @Guide(description: "Nights at this stop or days of car hire if applicable, otherwise 0.")
     var nights: Int
 
     @Guide(description: "Primary map location: city, town, or airport for this stop or leg. Empty if unknown.")
@@ -67,6 +67,7 @@ struct HolidayActivityImportDraft: Identifiable {
     var estimateNote: String
     var nights: Int = 0
     var locationName: String = ""
+    var fromLocationName: String = ""
 
     static func from(extracted: ExtractedHolidayItem, currency: AppCurrency) -> HolidayActivityImportDraft {
         let kind = HolidayActivityKind(rawValue: extracted.kind) ?? .other
@@ -96,8 +97,11 @@ struct HolidayActivityImportDraft: Identifiable {
         let name = extracted.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let extractedLocation = extracted.location.trimmingCharacters(in: .whitespacesAndNewlines)
         let locationName = extractedLocation.isEmpty
-            ? HolidayLocationParser.infer(from: name, kind: kind)
+            ? HolidayLocationParser.inferDestination(from: name, kind: kind)
             : extractedLocation
+        let fromLocationName = kind.hasFromToFields
+            ? HolidayLocationParser.inferOrigin(from: name, kind: kind)
+            : ""
 
         return HolidayActivityImportDraft(
             name: name,
@@ -106,7 +110,8 @@ struct HolidayActivityImportDraft: Identifiable {
             notes: extracted.notes.trimmingCharacters(in: .whitespacesAndNewlines),
             estimateNote: estimateNote,
             nights: extracted.nights,
-            locationName: locationName
+            locationName: locationName,
+            fromLocationName: fromLocationName
         )
     }
 

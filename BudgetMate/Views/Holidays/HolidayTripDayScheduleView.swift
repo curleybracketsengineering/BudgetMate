@@ -34,23 +34,33 @@ struct HolidayTripDayScheduleView: View {
                 let unscheduled = tripLayout.unscheduled
                 let lastDay = sections.last?.day
 
+                let scrollAnchors = tripDayScrollAnchors(
+                    sections: sections,
+                    hasUnscheduled: !unscheduled.isEmpty
+                )
+
                 VStack(alignment: .leading, spacing: 0) {
                     if !unscheduled.isEmpty {
                         unscheduledSection(unscheduled)
+                            .id(TripDayScrollAnchor.unscheduled)
                     }
 
                     ForEach(sections) { section in
                         daySection(section, lastDay: lastDay, sections: sections)
+                            .id(TripDayScrollAnchor.day(section.day))
                     }
                 }
+                .scrollTargetLayout()
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                .preference(key: TripDayScrollAnchorsKey.self, value: scrollAnchors)
             } else {
                 Text("Set a trip start date to organize activities by day.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 8)
+                    .preference(key: TripDayScrollAnchorsKey.self, value: [])
             }
         }
         .sheet(item: $addActivityContext) { context in
@@ -280,8 +290,8 @@ struct HolidayTripDayScheduleView: View {
         isStartDay: Bool = true
     ) -> some View {
         let isSelected = selectedActivityID == activity.id
-        let hotelNightLabel = tripDay.flatMap {
-            HolidayService.hotelStayNightLabel(activity: activity, holiday: holiday, tripDay: $0)
+        let durationLabel = tripDay.flatMap {
+            HolidayService.tripDayDurationLabel(activity: activity, holiday: holiday, tripDay: $0)
         }
 
         let rowContent = HStack(spacing: 10) {
@@ -317,8 +327,25 @@ struct HolidayTripDayScheduleView: View {
                     .foregroundStyle(isStartDay ? .primary : .secondary)
                     .lineLimit(2)
 
-                if mapStop == nil, let hotelNightLabel {
-                    Text(hotelNightLabel)
+                if let routeSummary = HolidayTravelEstimateService.routeSummaryLabel(
+                    activity: activity,
+                    holiday: holiday
+                ) {
+                    HStack(spacing: 6) {
+                        Text(routeSummary)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                        if activity.kind == .driving {
+                            HolidayDrivingRouteButton(activity: activity, holiday: holiday)
+                        }
+                    }
+                } else if activity.kind == .driving {
+                    HolidayDrivingRouteButton(activity: activity, holiday: holiday)
+                }
+
+                if mapStop == nil, let durationLabel {
+                    Text(durationLabel)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -350,14 +377,10 @@ struct HolidayTripDayScheduleView: View {
         .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
         .opacity(isStartDay ? 1 : 0.85)
         .contentShape(Rectangle())
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                selectActivity(activity)
-            }
+        .onActivitySelectionTap(
+            onSelect: { selectActivity(activity) },
+            onEdit: { onEditActivity?(activity) }
         )
-        .onTapGesture(count: 2) {
-            onEditActivity?(activity)
-        }
         .contextMenu {
             if let onEditActivity {
                 Button {
@@ -385,6 +408,18 @@ struct HolidayTripDayScheduleView: View {
                 Label("Delete", systemImage: "trash")
             }
         }
+    }
+
+    private func tripDayScrollAnchors(
+        sections: [HolidayService.TripDaySection],
+        hasUnscheduled: Bool
+    ) -> [TripDayScrollAnchor] {
+        var anchors: [TripDayScrollAnchor] = []
+        if hasUnscheduled {
+            anchors.append(.unscheduled)
+        }
+        anchors.append(contentsOf: sections.map { .day($0.day) })
+        return anchors
     }
 
     private func mapStopCircleColor(for stop: HolidayItineraryService.MapStop) -> Color {

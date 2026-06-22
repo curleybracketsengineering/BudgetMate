@@ -29,13 +29,18 @@ enum HolidayDescriptionImportService {
         - Create one item per bookable stop or travel leg (per-stop/leg granularity).
         - Flights: one row for long-haul open-jaw or return tickets when bundled; separate rows for clear internal legs (e.g. Johannesburg to Gqeberha).
         - Hotels: one row per stay location (e.g. Doha outbound, Johannesburg, Shamwari, Cape Town).
+        - Car hire: one row per rental; set nights to the hire duration in days (e.g. 10 for a 10-day hire).
         - Put lodge or hotel shortlists, activity ideas, and markdown links in notes — not as separate rows.
         - Transfers: one row per airport shuttle, hotel transfer, or private transfer leg.
-        - Use kind exactly as one of: flights, hotels, eatingOut, trips, carHire, transfer, insurance, other.
+        - Driving: one row per self-drive leg (fuel, tolls, parking) — not car hire.
+        - Boat: one row per ferry, cruise segment, or water crossing.
+        - Cycling: one row per cycling leg.
+        - Use kind exactly as one of: flights, hotels, eatingOut, trips, carHire, driving, transfer, boat, cycling, insurance, other.
         - Only set amountLowGBP and amountHighGBP when the source text states figures for that item.
         - Use 0 for amountLowGBP, amountHighGBP, nights, or durationNights when unknown.
-        - Set location to the primary city, town, or airport for map display (e.g. Cape Town, Doha, Shamwari).
-        - For flights, location is the arrival city or main airport for that leg.
+        - Set location to the arrival city, town, or airport for map display (e.g. Cape Town, Doha, Shamwari).
+        - For transport legs (flights, transfer, driving, boat, cycling), location is where the leg ends.
+        - For flights and other transport, include departure in the name as "Origin to Destination" when known.
         - Use empty strings for unknown text fields.
         - Prefer fewer well-described items over many thin rows (aim for roughly 12–20 items).
         - Preserve useful markdown links in notes.

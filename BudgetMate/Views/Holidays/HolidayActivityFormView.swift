@@ -24,8 +24,15 @@ struct HolidayActivityFormView: View {
     @State private var notes = ""
     @State private var subCategory: BudgetRuleSubCategory?
     @State private var linkedAccountId: UUID?
+    @State private var fromLocationName = ""
     @State private var locationName = ""
     @State private var countryName = ""
+    @State private var distanceText = ""
+    @State private var durationText = ""
+    @State private var travelEstimatesAreManual = false
+    @State private var isEstimatingTravel = false
+    @State private var travelEstimateTask: Task<Void, Never>?
+    @State private var isApplyingAutoEstimate = false
     @State private var nights = 0
     @State private var useCustomMonth = false
     @State private var plannedMonth = Calendar.current.component(.month, from: .now)
@@ -37,12 +44,8 @@ struct HolidayActivityFormView: View {
 
     private var calendar: Calendar { Calendar.current }
 
-    private var nightsLabel: String {
-        nights == 1 ? "1 night" : "\(nights) nights"
-    }
-
-    private var hotelCheckOutDate: Date? {
-        guard kind == .hotels, nights > 0 else { return nil }
+    private var durationEndDate: Date? {
+        guard kind.supportsMultiDayDuration, nights > 0 else { return nil }
         return calendar.date(byAdding: .day, value: nights - 1, to: calendar.startOfDay(for: startDate))
     }
 
@@ -52,6 +55,10 @@ struct HolidayActivityFormView: View {
 
     private var showsDatePickers: Bool {
         tripHasStartDate || hasSpecificDates
+    }
+
+    private var showsTravelEstimateSection: Bool {
+        kind.hasFromToFields && (kind.showsDistanceEstimate || kind.showsTravelDurationEstimate)
     }
 
     var body: some View {
@@ -64,19 +71,95 @@ struct HolidayActivityFormView: View {
                         }
                     }
                     .onChange(of: kind) { _, newKind in
-                        if newKind == .hotels {
+                        if newKind.supportsMultiDayDuration {
                             if nights < 1 {
                                 nights = 1
                             }
-                            syncHotelEndDateFromNights()
+                            syncDurationEndDate()
                         } else {
                             nights = 0
                         }
+                        if newKind.hasFromToFields {
+                            if !newKind.showsDistanceEstimate {
+                                distanceText = ""
+                            }
+                            if !newKind.showsTravelDurationEstimate {
+                                durationText = ""
+                            }
+                            scheduleTravelEstimate()
+                        } else {
+                            travelEstimateTask?.cancel()
+                            isEstimatingTravel = false
+                        }
                     }
                     TextField("Name", text: $name)
-                    TextField("Location", text: $locationName, prompt: Text("City or place (e.g. Cape Town)"))
+                    if kind.hasFromToFields {
+                        TextField("From", text: $fromLocationName, prompt: Text("Departure city or place"))
+                            .onChange(of: fromLocationName) { _, _ in
+                                locationsDidChange()
+                            }
+                        TextField("To", text: $locationName, prompt: Text("Arrival city or place (e.g. Cape Town)"))
+                            .onChange(of: locationName) { _, _ in
+                                locationsDidChange()
+                            }
+                    } else {
+                        TextField("Location", text: $locationName, prompt: Text("City or place (e.g. Cape Town)"))
+                    }
                     TextField("Country", text: $countryName, prompt: Text("Optional — uses trip country if empty"))
+                        .onChange(of: countryName) { _, _ in
+                            if kind.hasFromToFields {
+                                locationsDidChange()
+                            }
+                        }
                     TextField("Amount", text: $amountText)
+                }
+
+                if showsTravelEstimateSection {
+                    Section("Travel estimate") {
+                        if isEstimatingTravel {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Calculating estimate…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        if kind.showsDistanceEstimate {
+                            TextField("Distance (miles)", text: $distanceText, prompt: Text("e.g. 142"))
+                                .onChange(of: distanceText) { _, _ in
+                                    markTravelEstimatesManual()
+                                }
+                        }
+
+                        if kind.showsTravelDurationEstimate {
+                            TextField(
+                                kind == .flights ? "Flight time" : "Drive time",
+                                text: $durationText,
+                                prompt: Text("e.g. 2h 30m")
+                            )
+                            .onChange(of: durationText) { _, _ in
+                                markTravelEstimatesManual()
+                            }
+                        }
+
+                        if kind == .driving {
+                            HolidayDrivingRouteButton(
+                                origin: fromLocationName,
+                                destination: locationName,
+                                countryName: resolvedCountryNameForEstimate(),
+                                style: .labeled
+                            )
+                        }
+
+                        if !travelEstimatesAreManual,
+                           !distanceText.isEmpty || !durationText.isEmpty || isEstimatingTravel {
+                            Text("Estimated from the route. You can edit these values.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
 
                 Section("Category") {
@@ -105,27 +188,30 @@ struct HolidayActivityFormView: View {
                 Section("Dates") {
                     if showsDatePickers {
                         DatePicker(
-                            kind == .hotels ? "Check in" : "Starts",
+                            kind.durationStartDateLabel,
                             selection: $startDate,
                             displayedComponents: .date
                         )
                         .onChange(of: startDate) { _, _ in
-                            if kind == .hotels {
-                                syncHotelEndDateFromNights()
+                            if kind.supportsMultiDayDuration {
+                                syncDurationEndDate()
                             } else if hasEndDate, endDate < startDate {
                                 endDate = startDate
                             }
                         }
 
-                        if kind == .hotels {
-                            Stepper(nightsLabel, value: $nights, in: 1...60)
-                                .onChange(of: nights) { _, _ in
-                                    syncHotelEndDateFromNights()
+                        if kind.supportsMultiDayDuration {
+                            FormIntegerStepper(kind.durationStepperLabel, value: $nights, in: 1...60) { count in
+                                kind.durationLabel(count: count)
+                            }
+                            .onChange(of: nights) { _, _ in
+                                syncDurationEndDate()
+                            }
+                            if let durationEndDate {
+                                LabeledContent(kind.durationEndDateLabel) {
+                                    Text(durationEndDate.formatted(date: .abbreviated, time: .omitted))
+                                        .foregroundStyle(.secondary)
                                 }
-                            if let hotelCheckOutDate, nights > 1 {
-                                Text("Check out: \(hotelCheckOutDate.formatted(date: .abbreviated, time: .omitted))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
                             }
                         } else {
                             Toggle("Multi-day", isOn: $hasEndDate)
@@ -176,8 +262,13 @@ struct HolidayActivityFormView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
-                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Save") {
+                        Task { await save() }
+                    }
+                    .disabled(
+                        name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || isEstimatingTravel
+                    )
                 }
             }
             .onAppear {
@@ -186,6 +277,10 @@ struct HolidayActivityFormView: View {
                 } else {
                     loadNewActivityDefaults()
                 }
+                scheduleTravelEstimate()
+            }
+            .onDisappear {
+                travelEstimateTask?.cancel()
             }
         }
         .frame(minWidth: 420, minHeight: 480)
@@ -194,8 +289,19 @@ struct HolidayActivityFormView: View {
     private func loadExisting(from activity: HolidayActivity) {
         name = activity.name
         kind = activity.kind
+        fromLocationName = activity.fromLocationName
         locationName = activity.locationName
         countryName = activity.countryName
+        travelEstimatesAreManual = activity.travelEstimatesAreManual
+        distanceText = HolidayTravelEstimateService.formatDistanceMiles(km: activity.estimatedDistanceKm)
+        if activity.estimatedDurationMinutes > 0 {
+            durationText = HolidayTravelEstimateService.formatDuration(minutes: activity.estimatedDurationMinutes)
+        } else if let inferredMinutes = HolidayTravelEstimateService.inferDurationMinutes(from: activity.name) {
+            durationText = HolidayTravelEstimateService.formatDuration(minutes: inferredMinutes)
+            travelEstimatesAreManual = true
+        } else {
+            durationText = ""
+        }
         nights = activity.nights
         amountText = MoneyFormatter.majorUnitsString(minorUnits: activity.amountMinorUnits, currency: currency)
         notes = activity.notes
@@ -214,7 +320,7 @@ struct HolidayActivityFormView: View {
             end: activity.plannedEndDate
                 ?? HolidayService.resolvedEndDate(activity: activity, holiday: holiday)
         )
-        if kind == .hotels, nights < 1 {
+        if kind.supportsMultiDayDuration, nights < 1 {
             nights = inferredNights(from: startDate, end: endDate, hasEndDate: hasEndDate)
         }
     }
@@ -222,7 +328,7 @@ struct HolidayActivityFormView: View {
     private func loadNewActivityDefaults() {
         if let initialKind {
             kind = initialKind
-            if initialKind == .hotels {
+            if initialKind.supportsMultiDayDuration {
                 nights = 1
             }
         }
@@ -242,12 +348,12 @@ struct HolidayActivityFormView: View {
         guard let start else { return }
         hasSpecificDates = true
         startDate = start
-        if kind == .hotels {
+        if kind.supportsMultiDayDuration {
             if nights < 1 {
                 let spansMultipleDays = end.map { !calendar.isDate($0, inSameDayAs: start) } ?? false
                 nights = inferredNights(from: start, end: end, hasEndDate: spansMultipleDays)
             }
-            syncHotelEndDateFromNights()
+            syncDurationEndDate()
             return
         }
 
@@ -271,8 +377,8 @@ struct HolidayActivityFormView: View {
         return max(daySpan, 1)
     }
 
-    private func syncHotelEndDateFromNights() {
-        guard kind == .hotels else { return }
+    private func syncDurationEndDate() {
+        guard kind.supportsMultiDayDuration else { return }
         if nights > 1 {
             hasEndDate = true
             endDate = calendar.date(byAdding: .day, value: nights - 1, to: calendar.startOfDay(for: startDate)) ?? startDate
@@ -282,7 +388,12 @@ struct HolidayActivityFormView: View {
         }
     }
 
-    private func save() {
+    private func save() async {
+        travelEstimateTask?.cancel()
+        if showsTravelEstimateSection, !travelEstimatesAreManual {
+            await refreshTravelEstimateIfNeeded()
+        }
+
         let activity = existingActivity ?? HolidayActivity()
         if existingActivity == nil {
             activity.markCreated()
@@ -293,14 +404,29 @@ struct HolidayActivityFormView: View {
 
         activity.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         activity.kind = kind
+        let trimmedFrom = fromLocationName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedLocation = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedCountry = countryName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedLocation != activity.locationName || trimmedCountry != activity.countryName {
+        if trimmedFrom != activity.fromLocationName
+            || trimmedLocation != activity.locationName
+            || trimmedCountry != activity.countryName {
             activity.clearGeocodeCache()
         }
+        activity.fromLocationName = trimmedFrom
         activity.locationName = trimmedLocation
         activity.countryName = trimmedCountry
-        activity.nights = kind == .hotels ? max(nights, 1) : 0
+        activity.travelEstimatesAreManual = travelEstimatesAreManual
+        if kind.showsDistanceEstimate {
+            activity.estimatedDistanceKm = HolidayTravelEstimateService.parseDistanceMiles(distanceText) ?? 0
+        } else {
+            activity.estimatedDistanceKm = 0
+        }
+        if kind.showsTravelDurationEstimate {
+            activity.estimatedDurationMinutes = HolidayTravelEstimateService.parseDuration(durationText) ?? 0
+        } else {
+            activity.estimatedDurationMinutes = 0
+        }
+        activity.nights = kind.supportsMultiDayDuration ? max(nights, 1) : 0
         activity.amountMinorUnits = MoneyFormatter.parseMajorUnits(amountText, currency: currency) ?? 0
         activity.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         activity.subCategoryId = subCategory?.id
@@ -314,7 +440,7 @@ struct HolidayActivityFormView: View {
         }
         if showsDatePickers {
             activity.plannedStartDate = calendar.startOfDay(for: startDate)
-            if kind == .hotels {
+            if kind.supportsMultiDayDuration {
                 if nights > 1 {
                     activity.plannedEndDate = calendar.date(byAdding: .day, value: nights - 1, to: calendar.startOfDay(for: startDate))
                 } else {
@@ -351,5 +477,91 @@ struct HolidayActivityFormView: View {
         } catch {
             print("Activity save failed: \(error)")
         }
+    }
+
+    private func locationsDidChange() {
+        travelEstimatesAreManual = false
+        scheduleTravelEstimate()
+    }
+
+    private func markTravelEstimatesManual() {
+        guard !isApplyingAutoEstimate else { return }
+        travelEstimatesAreManual = true
+    }
+
+    private func scheduleTravelEstimate() {
+        travelEstimateTask?.cancel()
+        guard showsTravelEstimateSection, !travelEstimatesAreManual else { return }
+
+        let from = fromLocationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let to = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !from.isEmpty, !to.isEmpty else { return }
+
+        let country = resolvedCountryNameForEstimate()
+        let activityKind = kind
+
+        travelEstimateTask = Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run { isEstimatingTravel = true }
+            let estimate = await HolidayTravelEstimateService.estimate(
+                kind: activityKind,
+                fromLocationName: from,
+                toLocationName: to,
+                countryName: country
+            )
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                isEstimatingTravel = false
+                guard let estimate, !travelEstimatesAreManual else { return }
+                applyTravelEstimate(estimate)
+            }
+        }
+    }
+
+    private func resolvedCountryNameForEstimate() -> String {
+        let activityCountry = countryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !activityCountry.isEmpty { return activityCountry }
+
+        let holidayCountry = holiday.countryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !holidayCountry.isEmpty { return holidayCountry }
+
+        return ""
+    }
+
+    private func applyTravelEstimate(_ estimate: HolidayTravelEstimateService.Estimate) {
+        isApplyingAutoEstimate = true
+        defer { isApplyingAutoEstimate = false }
+
+        if kind.showsDistanceEstimate, let distanceKm = estimate.distanceKm {
+            distanceText = HolidayTravelEstimateService.formatDistanceMiles(km: distanceKm)
+        }
+        if kind.showsTravelDurationEstimate, let durationMinutes = estimate.durationMinutes {
+            durationText = HolidayTravelEstimateService.formatDuration(minutes: durationMinutes)
+        }
+    }
+
+    private func refreshTravelEstimateIfNeeded() async {
+        let from = fromLocationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let to = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !from.isEmpty, !to.isEmpty else { return }
+
+        let needsDistance = kind.showsDistanceEstimate && distanceText.isEmpty
+        let needsDuration = kind.showsTravelDurationEstimate && durationText.isEmpty
+        guard needsDistance || needsDuration else { return }
+
+        isEstimatingTravel = true
+        defer { isEstimatingTravel = false }
+
+        let estimate = await HolidayTravelEstimateService.estimate(
+            kind: kind,
+            fromLocationName: from,
+            toLocationName: to,
+            countryName: resolvedCountryNameForEstimate()
+        )
+        guard !travelEstimatesAreManual, let estimate else { return }
+        applyTravelEstimate(estimate)
     }
 }

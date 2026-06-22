@@ -11,6 +11,7 @@ struct HolidayActivityCalendarView: View {
     @Binding var selectedActivityID: UUID?
     @Binding var pasteTargetDate: Date?
     var onKeyboardFocus: () -> Void = {}
+    var onOpenDaySchedule: (Date) -> Void = { _ in }
     var onEditActivity: (HolidayActivity) -> Void
 
     @State private var dropTargetDate: Date?
@@ -131,7 +132,7 @@ struct HolidayActivityCalendarView: View {
                 .foregroundStyle(isToday ? Color.accentColor : .primary)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    selectPasteTarget(dayStart)
+                    openDaySchedule(dayStart)
                 }
 
             ForEach(visibleActivitiesList, id: \.id) { activity in
@@ -185,6 +186,11 @@ struct HolidayActivityCalendarView: View {
         .contentShape(Rectangle())
         .contextMenu {
             Button {
+                openDaySchedule(dayStart)
+            } label: {
+                Label("View day schedule", systemImage: "list.bullet.indent")
+            }
+            Button {
                 addActivityContext = HolidayAddActivityContext(initialStartDate: dayStart)
             } label: {
                 Label("Add activity", systemImage: "plus")
@@ -211,6 +217,7 @@ struct HolidayActivityCalendarView: View {
 
     @ViewBuilder
     private func activityTile(_ activity: HolidayActivity, dayStart: Date, isDraggable: Bool) -> some View {
+        let isSelected = selectedActivityID == activity.id
         let tile = HStack(spacing: 3) {
             Image(systemName: activity.kind.systemImage)
                 .font(.system(size: 8))
@@ -221,15 +228,20 @@ struct HolidayActivityCalendarView: View {
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(activityColor(for: activity.kind).opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+        .background(activityColor(for: activity.kind).opacity(isSelected ? 0.35 : 0.2), in: RoundedRectangle(cornerRadius: 3))
+        .overlay(
+            RoundedRectangle(cornerRadius: 3)
+                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+        )
         .foregroundStyle(activityColor(for: activity.kind))
         .contentShape(Rectangle())
-        .onTapGesture {
-            selectActivity(activity, defaultDay: dayStart)
-            onEditActivity(activity)
-        }
+        .onActivitySelectionTap(
+            onSelect: { selectActivity(activity, defaultDay: dayStart) },
+            onEdit: { onEditActivity(activity) }
+        )
         .contextMenu {
             Button {
+                selectActivity(activity, defaultDay: dayStart)
                 onEditActivity(activity)
             } label: {
                 Label("Edit", systemImage: "pencil")
@@ -241,6 +253,7 @@ struct HolidayActivityCalendarView: View {
             }
             .keyboardShortcut("c", modifiers: .command)
             Button(role: .destructive) {
+                selectActivity(activity, defaultDay: dayStart)
                 activityPendingDeletion = activity
             } label: {
                 Label("Delete", systemImage: "trash")
@@ -250,7 +263,7 @@ struct HolidayActivityCalendarView: View {
         if isDraggable {
             tile.draggable(activity.id.uuidString)
         } else {
-            tile.opacity(0.85)
+            tile.opacity(isSelected ? 1 : 0.85)
         }
     }
 
@@ -259,7 +272,7 @@ struct HolidayActivityCalendarView: View {
             Image(systemName: "arrow.up.and.down")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text("Drag to resize day cells")
+            Text("Drag to resize day cells · Click a day to open its schedule")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -345,7 +358,10 @@ struct HolidayActivityCalendarView: View {
         case .flights: .blue
         case .hotels: .purple
         case .carHire: .orange
+        case .driving: .brown
         case .transfer: .indigo
+        case .boat: .cyan
+        case .cycling: .mint
         case .eatingOut: .pink
         case .trips: .green
         case .insurance: .teal
@@ -398,6 +414,11 @@ struct HolidayActivityCalendarView: View {
             print("Calendar activity move save failed: \(error)")
             return false
         }
+    }
+
+    private func openDaySchedule(_ dayStart: Date) {
+        selectPasteTarget(dayStart)
+        onOpenDaySchedule(dayStart)
     }
 
     private func selectPasteTarget(_ dayStart: Date) {
