@@ -19,8 +19,6 @@ enum PrintService {
 
         #if os(macOS)
         printOnMac(document, jobName: title)
-        #elseif canImport(UIKit)
-        printOnUIKit(document, jobName: title)
         #endif
     }
 
@@ -117,18 +115,6 @@ enum PrintService {
         context.endPDFPage()
         context.closePDF()
         return pdfData as Data
-    }
-    #endif
-
-    #if canImport(UIKit) && !os(macOS)
-    @MainActor
-    private static func printOnUIKit<V: View>(_ view: V, jobName: String) {
-        guard let pdfData = renderPDF(from: view) else { return }
-
-        let controller = UIPrintInteractionController.shared
-        controller.printingItem = pdfData
-        controller.jobName = jobName
-        controller.present(animated: true)
     }
     #endif
 

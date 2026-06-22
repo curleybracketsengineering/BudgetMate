@@ -62,6 +62,7 @@ struct DashboardView: View {
         }
         .navigationTitle("Dashboard")
         .toolbar {
+            #if os(macOS)
             ToolbarItem {
                 Button {
                     printDashboard()
@@ -71,6 +72,7 @@ struct DashboardView: View {
                 .disabled(settings == nil || accounts.isEmpty)
                 .help("Print account balances and forecast")
             }
+            #endif
         }
         .onAppear {
             if selectedAccountId == nil, accounts.count == 1 {

@@ -6,6 +6,7 @@ enum HolidayActivityKind: String, Codable, CaseIterable, Identifiable {
     case eatingOut
     case trips
     case carHire
+    case transfer
     case insurance
     case other
 
@@ -18,6 +19,7 @@ enum HolidayActivityKind: String, Codable, CaseIterable, Identifiable {
         case .eatingOut: "Eating out"
         case .trips: "Trips & excursions"
         case .carHire: "Car hire"
+        case .transfer: "Transfer"
         case .insurance: "Insurance"
         case .other: "Other"
         }
@@ -30,8 +32,18 @@ enum HolidayActivityKind: String, Codable, CaseIterable, Identifiable {
         case .eatingOut: "fork.knife"
         case .trips: "map"
         case .carHire: "car"
+        case .transfer: "bus"
         case .insurance: "shield"
         case .other: "ellipsis.circle"
+        }
+    }
+
+    var showsOnTripMap: Bool {
+        switch self {
+        case .flights, .hotels, .trips, .carHire, .transfer, .eatingOut:
+            true
+        case .insurance, .other:
+            false
         }
     }
 }

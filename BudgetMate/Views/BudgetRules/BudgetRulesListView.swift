@@ -540,11 +540,13 @@ struct BudgetRulesListView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup {
             Menu {
+                #if os(macOS)
                 Button {
                     printBudgetRules()
                 } label: {
                     Label("Print…", systemImage: "printer")
                 }
+                #endif
 
                 Button {
                     exportBudgetRulesPDF()

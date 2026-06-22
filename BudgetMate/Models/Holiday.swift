@@ -7,6 +7,10 @@ final class Holiday {
     var name: String = ""
     var destination: String = ""
     var origin: String = ""
+    /// Default country for map geocoding when an activity has no country set.
+    var countryName: String = ""
+    /// Long-form trip write-up (e.g. pasted from an assistant or travel research).
+    var tripDescription: String = ""
     var notes: String = ""
     var plannedStartDate: Date?
     var plannedEndDate: Date?

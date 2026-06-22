@@ -1,6 +1,12 @@
 import SwiftUI
 import SwiftData
 
+struct HolidayAddActivityContext: Identifiable {
+    let id = UUID()
+    var initialStartDate: Date?
+    var initialKind: HolidayActivityKind?
+}
+
 struct HolidayActivityFormView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -9,6 +15,8 @@ struct HolidayActivityFormView: View {
     let currency: AppCurrency
     let holiday: Holiday
     var existingActivity: HolidayActivity?
+    var initialStartDate: Date?
+    var initialKind: HolidayActivityKind?
 
     @State private var name = ""
     @State private var kind: HolidayActivityKind = .other
@@ -16,9 +24,35 @@ struct HolidayActivityFormView: View {
     @State private var notes = ""
     @State private var subCategory: BudgetRuleSubCategory?
     @State private var linkedAccountId: UUID?
+    @State private var locationName = ""
+    @State private var countryName = ""
+    @State private var nights = 0
     @State private var useCustomMonth = false
     @State private var plannedMonth = Calendar.current.component(.month, from: .now)
     @State private var plannedYear = Calendar.current.component(.year, from: .now)
+    @State private var hasSpecificDates = false
+    @State private var startDate = Date.now
+    @State private var hasEndDate = false
+    @State private var endDate = Date.now
+
+    private var calendar: Calendar { Calendar.current }
+
+    private var nightsLabel: String {
+        nights == 1 ? "1 night" : "\(nights) nights"
+    }
+
+    private var hotelCheckOutDate: Date? {
+        guard kind == .hotels, nights > 0 else { return nil }
+        return calendar.date(byAdding: .day, value: nights - 1, to: calendar.startOfDay(for: startDate))
+    }
+
+    private var tripHasStartDate: Bool {
+        holiday.plannedStartDate != nil
+    }
+
+    private var showsDatePickers: Bool {
+        tripHasStartDate || hasSpecificDates
+    }
 
     var body: some View {
         NavigationStack {
@@ -29,7 +63,19 @@ struct HolidayActivityFormView: View {
                             Label(kind.displayName, systemImage: kind.systemImage).tag(kind)
                         }
                     }
+                    .onChange(of: kind) { _, newKind in
+                        if newKind == .hotels {
+                            if nights < 1 {
+                                nights = 1
+                            }
+                            syncHotelEndDateFromNights()
+                        } else {
+                            nights = 0
+                        }
+                    }
                     TextField("Name", text: $name)
+                    TextField("Location", text: $locationName, prompt: Text("City or place (e.g. Cape Town)"))
+                    TextField("Country", text: $countryName, prompt: Text("Optional — uses trip country if empty"))
                     TextField("Amount", text: $amountText)
                 }
 
@@ -56,9 +102,71 @@ struct HolidayActivityFormView: View {
                     }
                 }
 
+                Section("Dates") {
+                    if showsDatePickers {
+                        DatePicker(
+                            kind == .hotels ? "Check in" : "Starts",
+                            selection: $startDate,
+                            displayedComponents: .date
+                        )
+                        .onChange(of: startDate) { _, _ in
+                            if kind == .hotels {
+                                syncHotelEndDateFromNights()
+                            } else if hasEndDate, endDate < startDate {
+                                endDate = startDate
+                            }
+                        }
+
+                        if kind == .hotels {
+                            Stepper(nightsLabel, value: $nights, in: 1...60)
+                                .onChange(of: nights) { _, _ in
+                                    syncHotelEndDateFromNights()
+                                }
+                            if let hotelCheckOutDate, nights > 1 {
+                                Text("Check out: \(hotelCheckOutDate.formatted(date: .abbreviated, time: .omitted))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Toggle("Multi-day", isOn: $hasEndDate)
+                            if hasEndDate {
+                                DatePicker(
+                                    "Ends",
+                                    selection: $endDate,
+                                    in: startDate...,
+                                    displayedComponents: .date
+                                )
+                            }
+                        }
+                    } else {
+                        Toggle("Specific dates", isOn: $hasSpecificDates)
+                        if hasSpecificDates {
+                            DatePicker("Starts", selection: $startDate, displayedComponents: .date)
+                                .onChange(of: startDate) { _, _ in
+                                    if hasEndDate, endDate < startDate {
+                                        endDate = startDate
+                                    }
+                                }
+                            Toggle("Multi-day", isOn: $hasEndDate)
+                            if hasEndDate {
+                                DatePicker(
+                                    "Ends",
+                                    selection: $endDate,
+                                    in: startDate...,
+                                    displayedComponents: .date
+                                )
+                            }
+                        } else {
+                            Text("Set a trip start date, or turn on specific dates.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
                 Section("Notes") {
                     TextField("Notes", text: $notes, axis: .vertical)
-                        .lineLimit(2...4)
+                        .lineLimit(4...12)
                 }
             }
             .formStyle(.grouped)
@@ -72,15 +180,23 @@ struct HolidayActivityFormView: View {
                         .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .onAppear { loadExisting() }
+            .onAppear {
+                if let existingActivity {
+                    loadExisting(from: existingActivity)
+                } else {
+                    loadNewActivityDefaults()
+                }
+            }
         }
         .frame(minWidth: 420, minHeight: 480)
     }
 
-    private func loadExisting() {
-        guard let activity = existingActivity else { return }
+    private func loadExisting(from activity: HolidayActivity) {
         name = activity.name
         kind = activity.kind
+        locationName = activity.locationName
+        countryName = activity.countryName
+        nights = activity.nights
         amountText = MoneyFormatter.majorUnitsString(minorUnits: activity.amountMinorUnits, currency: currency)
         notes = activity.notes
         subCategory = activity.subCategoryId.flatMap { id in
@@ -91,6 +207,78 @@ struct HolidayActivityFormView: View {
             useCustomMonth = true
             plannedYear = activity.plannedYear
             plannedMonth = activity.plannedMonth
+        }
+        applyResolvedDates(
+            start: activity.plannedStartDate
+                ?? HolidayService.resolvedStartDate(activity: activity, holiday: holiday),
+            end: activity.plannedEndDate
+                ?? HolidayService.resolvedEndDate(activity: activity, holiday: holiday)
+        )
+        if kind == .hotels, nights < 1 {
+            nights = inferredNights(from: startDate, end: endDate, hasEndDate: hasEndDate)
+        }
+    }
+
+    private func loadNewActivityDefaults() {
+        if let initialKind {
+            kind = initialKind
+            if initialKind == .hotels {
+                nights = 1
+            }
+        }
+        if let initialStartDate {
+            applyResolvedDates(start: initialStartDate, end: initialStartDate)
+            let components = calendar.dateComponents([.year, .month], from: initialStartDate)
+            if let year = components.year, let month = components.month {
+                plannedYear = year
+                plannedMonth = month
+            }
+        } else if let tripStart = holiday.plannedStartDate {
+            applyResolvedDates(start: tripStart, end: tripStart)
+        }
+    }
+
+    private func applyResolvedDates(start: Date?, end: Date?) {
+        guard let start else { return }
+        hasSpecificDates = true
+        startDate = start
+        if kind == .hotels {
+            if nights < 1 {
+                let spansMultipleDays = end.map { !calendar.isDate($0, inSameDayAs: start) } ?? false
+                nights = inferredNights(from: start, end: end, hasEndDate: spansMultipleDays)
+            }
+            syncHotelEndDateFromNights()
+            return
+        }
+
+        if let end, !calendar.isDate(end, inSameDayAs: start) {
+            hasEndDate = true
+            endDate = end
+        } else if nights > 1 {
+            hasEndDate = true
+            endDate = calendar.date(byAdding: .day, value: nights - 1, to: start) ?? start
+        } else {
+            hasEndDate = false
+            endDate = start
+        }
+    }
+
+    private func inferredNights(from start: Date, end: Date?, hasEndDate: Bool) -> Int {
+        guard hasEndDate, let end else { return 1 }
+        let startDay = calendar.startOfDay(for: start)
+        let endDay = calendar.startOfDay(for: end)
+        let daySpan = (calendar.dateComponents([.day], from: startDay, to: endDay).day ?? 0) + 1
+        return max(daySpan, 1)
+    }
+
+    private func syncHotelEndDateFromNights() {
+        guard kind == .hotels else { return }
+        if nights > 1 {
+            hasEndDate = true
+            endDate = calendar.date(byAdding: .day, value: nights - 1, to: calendar.startOfDay(for: startDate)) ?? startDate
+        } else {
+            hasEndDate = false
+            endDate = startDate
         }
     }
 
@@ -105,6 +293,14 @@ struct HolidayActivityFormView: View {
 
         activity.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         activity.kind = kind
+        let trimmedLocation = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedCountry = countryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedLocation != activity.locationName || trimmedCountry != activity.countryName {
+            activity.clearGeocodeCache()
+        }
+        activity.locationName = trimmedLocation
+        activity.countryName = trimmedCountry
+        activity.nights = kind == .hotels ? max(nights, 1) : 0
         activity.amountMinorUnits = MoneyFormatter.parseMajorUnits(amountText, currency: currency) ?? 0
         activity.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         activity.subCategoryId = subCategory?.id
@@ -115,6 +311,24 @@ struct HolidayActivityFormView: View {
         } else {
             activity.plannedYear = 0
             activity.plannedMonth = 0
+        }
+        if showsDatePickers {
+            activity.plannedStartDate = calendar.startOfDay(for: startDate)
+            if kind == .hotels {
+                if nights > 1 {
+                    activity.plannedEndDate = calendar.date(byAdding: .day, value: nights - 1, to: calendar.startOfDay(for: startDate))
+                } else {
+                    activity.plannedEndDate = nil
+                }
+            } else if hasEndDate {
+                activity.plannedEndDate = calendar.startOfDay(for: endDate)
+            } else {
+                activity.plannedEndDate = nil
+            }
+            activity.estimateSource = .manual
+        } else {
+            activity.plannedStartDate = nil
+            activity.plannedEndDate = nil
         }
         activity.markUpdated()
         holiday.markUpdated()

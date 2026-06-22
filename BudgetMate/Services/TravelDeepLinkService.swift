@@ -133,13 +133,17 @@ enum TravelDeepLinkService {
             .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? text.lowercased()
     }
 
-    private static func isoDate(_ date: Date?) -> String? {
-        guard let date else { return nil }
+    private static func isoDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_GB_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
+    }
+
+    private static func isoDate(_ date: Date?) -> String? {
+        guard let date else { return nil }
+        return isoDate(date)
     }
 
     private static func skyscannerDate(_ date: Date?) -> String? {

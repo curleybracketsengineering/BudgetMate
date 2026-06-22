@@ -10,6 +10,19 @@ final class HolidayActivity {
     /// 0 means inherit from holiday default or trip start month.
     var plannedYear: Int = 0
     var plannedMonth: Int = 0
+    var plannedStartDate: Date?
+    var plannedEndDate: Date?
+    /// City, town, or airport shown on the trip map. Empty means infer from the activity name.
+    var locationName: String = ""
+    /// Country used to disambiguate map geocoding. Empty inherits the trip default.
+    var countryName: String = ""
+    /// Cached geocode. Both 0 means not yet resolved.
+    var latitude: Double = 0
+    var longitude: Double = 0
+    /// Search query used for the cached coordinate. Cleared when location or country changes.
+    var geocodedSearchQuery: String = ""
+    /// Nights at this stop. 0 means same-day or unknown (e.g. a flight leg).
+    var nights: Int = 0
     var linkedAccountId: UUID?
     var subCategoryId: UUID?
     var sortOrder: Int = 0
@@ -35,5 +48,20 @@ final class HolidayActivity {
     var estimateSource: HolidayActivityEstimateSource {
         get { HolidayActivityEstimateSource(rawValue: estimateSourceRaw) ?? .manual }
         set { estimateSourceRaw = newValue.rawValue }
+    }
+
+    var hasStoredCoordinate: Bool {
+        latitude != 0 || longitude != 0
+    }
+
+    func clearGeocodeCache() {
+        latitude = 0
+        longitude = 0
+        geocodedSearchQuery = ""
+    }
+
+    var coordinate: (latitude: Double, longitude: Double)? {
+        guard hasStoredCoordinate else { return nil }
+        return (latitude, longitude)
     }
 }

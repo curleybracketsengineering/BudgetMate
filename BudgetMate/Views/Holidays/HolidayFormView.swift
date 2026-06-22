@@ -15,6 +15,8 @@ struct HolidayFormView: View {
     @State private var name = ""
     @State private var origin = ""
     @State private var destination = ""
+    @State private var countryName = ""
+    @State private var tripDescription = ""
     @State private var notes = ""
     @State private var hasStartDate = false
     @State private var startDate = Date.now
@@ -64,6 +66,7 @@ struct HolidayFormView: View {
                     TextField("Name", text: $name)
                     TextField("Origin (optional)", text: $origin)
                     TextField("Destination", text: $destination)
+                    TextField("Country (for map)", text: $countryName, prompt: Text("e.g. South Africa"))
                 }
 
                 Section("Dates") {
@@ -134,9 +137,19 @@ struct HolidayFormView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section {
+                    TextEditor(text: $tripDescription)
+                        .frame(minHeight: 100)
+                } header: {
+                    Text("Description")
+                } footer: {
+                    Text("Overview of the trip — useful for import from description and your own reference.")
+                        .font(.caption)
+                }
+
                 Section("Notes") {
-                    TextField("Notes", text: $notes, axis: .vertical)
-                        .lineLimit(3...6)
+                    TextEditor(text: $notes)
+                        .frame(minHeight: 80)
                 }
             }
             .formStyle(.grouped)
@@ -167,7 +180,7 @@ struct HolidayFormView: View {
                 Text("The end date must be on or after the start date.")
             }
         }
-        .frame(minWidth: 440, minHeight: 520)
+        .frame(minWidth: 440, minHeight: 640)
     }
 
     private func loadExisting() {
@@ -175,6 +188,8 @@ struct HolidayFormView: View {
         name = holiday.name
         origin = holiday.origin
         destination = holiday.destination
+        countryName = holiday.countryName
+        tripDescription = holiday.tripDescription
         notes = holiday.notes
         if let start = holiday.plannedStartDate {
             hasStartDate = true
@@ -214,6 +229,14 @@ struct HolidayFormView: View {
         holiday.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         holiday.origin = origin.trimmingCharacters(in: .whitespacesAndNewlines)
         holiday.destination = destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedCountry = countryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedCountry != holiday.countryName {
+            for activity in holiday.activities {
+                activity.clearGeocodeCache()
+            }
+        }
+        holiday.countryName = trimmedCountry
+        holiday.tripDescription = tripDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         holiday.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         holiday.plannedStartDate = hasStartDate ? calendar.startOfDay(for: startDate) : nil
         holiday.plannedEndDate = hasStartDate ? calendar.startOfDay(for: resolvedEndDate ?? startDate) : nil

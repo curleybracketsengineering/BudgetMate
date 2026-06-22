@@ -82,11 +82,13 @@ struct MonthlyPlanView: View {
         .toolbar {
             ToolbarItemGroup {
                 Menu {
+                    #if os(macOS)
                     Button {
                         printMonthlyPlan()
                     } label: {
                         Label("Print…", systemImage: "printer")
                     }
+                    #endif
 
                     Button {
                         exportMonthlyPlanPDF()
