@@ -1,6 +1,6 @@
 import Foundation
 
-/// Parses Quicken/QBO bank exports in OFX 1.x SGML format (OFXHEADER + `<OFX>` body).
+/// Parses Quicken/QBO and Open Financial Exchange (OFX) bank exports in OFX 1.x SGML format (OFXHEADER + `<OFX>` body).
 enum BankQBOParser {
     enum ParseError: LocalizedError {
         case emptyFile
@@ -10,8 +10,8 @@ enum BankQBOParser {
         var errorDescription: String? {
             switch self {
             case .emptyFile: "The file is empty."
-            case .invalidFormat: "Could not find OFX transaction data in this QBO file."
-            case .noTransactions: "No transactions were found in the QBO file."
+            case .invalidFormat: "Could not find OFX transaction data in this file."
+            case .noTransactions: "No transactions were found in this file."
             }
         }
     }

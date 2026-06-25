@@ -36,26 +36,14 @@ enum HolidayItineraryService {
         }
     }
 
-    static func resolvedDestinationName(activity: HolidayActivity, holiday: Holiday) -> String {
-        let stored = activity.locationName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !stored.isEmpty { return stored }
-
-        let inferred = HolidayLocationParser.inferDestination(from: activity.name, kind: activity.kind)
-        if !inferred.isEmpty { return inferred }
-
-        if activity.kind == .hotels || activity.kind == .carHire {
-            let holidayDestination = holiday.destination.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !holidayDestination.isEmpty { return holidayDestination }
-        }
-
-        return ""
+    /// Departure place entered on the activity. Map routing uses only explicit values.
+    static func explicitOriginName(activity: HolidayActivity) -> String {
+        activity.fromLocationName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    static func resolvedOriginName(activity: HolidayActivity) -> String {
-        let stored = activity.fromLocationName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !stored.isEmpty { return stored }
-
-        return HolidayLocationParser.inferOrigin(from: activity.name, kind: activity.kind)
+    /// Arrival or stop place entered on the activity. Map routing uses only explicit values.
+    static func explicitDestinationName(activity: HolidayActivity) -> String {
+        activity.locationName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func resolvedCountryName(activity: HolidayActivity, holiday: Holiday) -> String {
@@ -75,15 +63,12 @@ enum HolidayItineraryService {
         var previousLocation: String?
 
         for activity in sorted {
-            let destinationName = resolvedDestinationName(activity: activity, holiday: holiday)
+            let destinationName = explicitDestinationName(activity: activity)
             let originName = activity.kind.hasFromToFields
-                ? resolvedOriginName(activity: activity)
+                ? explicitOriginName(activity: activity)
                 : ""
-            let hasExplicitLocation = !activity.locationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !activity.fromLocationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-
-            guard activity.kind.showsOnTripMap || hasExplicitLocation else { continue }
-            guard !destinationName.isEmpty || !originName.isEmpty else { continue }
+            let hasExplicitLocation = !destinationName.isEmpty || !originName.isEmpty
+            guard hasExplicitLocation else { continue }
 
             let countryName = resolvedCountryName(activity: activity, holiday: holiday)
             let startDate = HolidayService.resolvedStartDate(activity: activity, holiday: holiday)

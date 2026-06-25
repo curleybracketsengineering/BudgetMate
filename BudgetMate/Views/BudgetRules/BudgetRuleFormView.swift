@@ -8,6 +8,7 @@ struct BudgetRuleFormView: View {
     let currency: AppCurrency
     var existingRule: BudgetRule?
     var template: BudgetRuleStarterTemplate?
+    var prefilledSubCategory: BudgetRuleSubCategory?
 
     @State private var name = ""
     @State private var amountText = ""
@@ -102,21 +103,34 @@ struct BudgetRuleFormView: View {
             return
         }
 
-        guard let template else { return }
-        name = template.name
-        type = template.type
-        if let orderGroup = BudgetRuleService.OrderGroup.forPicker(from: template.type),
-           !template.defaultSubCategoryTitle.isEmpty {
-            subCategory = BudgetRuleSubCategoryService.findOrCreate(
-                orderGroup: orderGroup,
-                title: template.defaultSubCategoryTitle,
-                in: modelContext
-            )
+        if let template {
+            name = template.name
+            type = template.type
+            if let orderGroup = BudgetRuleService.OrderGroup.forPicker(from: template.type),
+               !template.defaultSubCategoryTitle.isEmpty {
+                subCategory = BudgetRuleSubCategoryService.findOrCreate(
+                    orderGroup: orderGroup,
+                    title: template.defaultSubCategoryTitle,
+                    in: modelContext
+                )
+            }
+            cycle = template.cycle
+            commitment = template.commitment
+            confidence = template.confidence
+            selectedMonths = BudgetRuleService.parseMonthPattern(template.monthPatternRaw)
+            return
         }
-        cycle = template.cycle
-        commitment = template.commitment
-        confidence = template.confidence
-        selectedMonths = BudgetRuleService.parseMonthPattern(template.monthPatternRaw)
+
+        guard let prefilledSubCategory else { return }
+        subCategory = prefilledSubCategory
+        switch prefilledSubCategory.orderGroup {
+        case .incoming:
+            type = .income
+        case .outgoing:
+            type = .expense
+        case .other:
+            break
+        }
     }
 
     private func save() {

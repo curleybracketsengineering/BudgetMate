@@ -1,5 +1,21 @@
 import SwiftUI
 
+enum PrintTypography {
+    static let documentBrand = Font.system(size: 8, weight: .semibold)
+    static let documentTitle = Font.system(size: 9, weight: .semibold)
+    static let documentDate = Font.system(size: 8)
+    static let sectionTitle = Font.system(size: 9, weight: .semibold)
+    static let sectionHeader = Font.system(size: 8, weight: .semibold)
+    static let body = Font.system(size: 8)
+    static let bodyMedium = Font.system(size: 8, weight: .medium)
+    static let bodySemibold = Font.system(size: 8, weight: .semibold)
+    static let label = Font.system(size: 8)
+    static let metadata = Font.system(size: 8)
+    static let amount = Font.system(size: 8).monospacedDigit()
+    static let amountSemibold = Font.system(size: 8, weight: .semibold).monospacedDigit()
+    static let icon = Font.system(size: 8)
+}
+
 struct PrintSummaryItem: Identifiable {
     let id = UUID()
     let title: String
@@ -17,10 +33,10 @@ struct PrintSummaryGrid: View {
             ForEach(items) { item in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.title)
-                        .font(.caption)
+                        .font(PrintTypography.label)
                         .foregroundStyle(.secondary)
                     Text(item.value)
-                        .font(.title3.weight(.semibold).monospacedDigit())
+                        .font(PrintTypography.amountSemibold)
                         .foregroundStyle(item.tint)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -43,7 +59,7 @@ struct PrintSectionHeader: View {
 
     var body: some View {
         Text(title.uppercased())
-            .font(.caption.weight(.semibold))
+            .font(PrintTypography.sectionHeader)
             .foregroundStyle(.secondary)
             .tracking(0.8)
             .padding(.top, 2)
@@ -56,7 +72,7 @@ struct PrintFootnote: View {
 
     var body: some View {
         Text(text)
-            .font(.caption)
+            .font(PrintTypography.metadata)
             .foregroundStyle(.secondary)
             .padding(.top, 4)
     }
@@ -73,18 +89,18 @@ struct PrintRuleRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(name)
-                        .font(.body.weight(.medium))
+                        .font(PrintTypography.bodyMedium)
                     Text(metadata)
-                        .font(.caption)
+                        .font(PrintTypography.metadata)
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 12)
                 VStack(alignment: .trailing, spacing: 1) {
                     Text(amount)
-                        .font(.body.weight(.semibold).monospacedDigit())
+                        .font(PrintTypography.amountSemibold)
                     if let badge {
                         Text(badge)
-                            .font(.caption2)
+                            .font(PrintTypography.metadata)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -105,7 +121,7 @@ struct PrintTableHeader: View {
             ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
                 let alignment = index < alignments.count ? alignments[index] : .leading
                 Text(column)
-                    .font(.caption.weight(.semibold))
+                    .font(PrintTypography.sectionHeader)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: Alignment(horizontal: alignment, vertical: .center))
             }
@@ -127,7 +143,7 @@ struct PrintTableRow: View {
                 let alignment = index < alignments.count ? alignments[index] : .leading
                 let tint = index < tints.count ? tints[index] : .primary
                 Text(value)
-                    .font(isBold ? .subheadline.weight(.semibold).monospacedDigit() : .subheadline.monospacedDigit())
+                    .font(isBold ? PrintTypography.amountSemibold : PrintTypography.amount)
                     .foregroundStyle(tint)
                     .frame(maxWidth: .infinity, alignment: Alignment(horizontal: alignment, vertical: .center))
             }

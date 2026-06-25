@@ -14,6 +14,7 @@ struct BudgetRulesListView: View {
     @State private var searchText = ""
     @State private var showingNewRule = false
     @State private var newRuleTemplate: BudgetRuleStarterTemplate?
+    @State private var newRuleSubCategory: BudgetRuleSubCategory?
     @State private var showArchived = false
     @State private var rulePendingDeletion: BudgetRule?
     @State private var filterAccountId: UUID?
@@ -129,8 +130,15 @@ struct BudgetRulesListView: View {
         .navigationTitle("Budget Rules")
         .searchable(text: $searchText, prompt: "Search by name or amount")
         .toolbar { toolbarContent }
-        .sheet(isPresented: $showingNewRule, onDismiss: { newRuleTemplate = nil }) {
-            BudgetRuleFormView(currency: currency, template: newRuleTemplate)
+        .sheet(isPresented: $showingNewRule, onDismiss: {
+            newRuleTemplate = nil
+            newRuleSubCategory = nil
+        }) {
+            BudgetRuleFormView(
+                currency: currency,
+                template: newRuleTemplate,
+                prefilledSubCategory: newRuleSubCategory
+            )
         }
         .onChange(of: showArchived) {
             if let selectedRule, !matchesArchiveFilter(selectedRule) {
@@ -317,7 +325,7 @@ struct BudgetRulesListView: View {
             if !otherRules.isEmpty {
                 Section("Other") {
                     ForEach(otherRules, id: \.id) { rule in
-                        ruleRow(rule)
+                        ruleRow(rule, showDragHandle: canReorder)
                     }
                 }
             }
@@ -333,6 +341,7 @@ struct BudgetRulesListView: View {
             }
         }
         .listStyle(.plain)
+        .contentMargins(.bottom, 20, for: .scrollContent)
         .environment(\.defaultMinListRowHeight, 32)
     }
 
@@ -394,6 +403,8 @@ struct BudgetRulesListView: View {
         } header: {
             HStack {
                 Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
                 Spacer()
                 Button {
                     orderGroupPendingAdd = orderGroup
@@ -420,8 +431,12 @@ struct BudgetRulesListView: View {
                 rules: subCategoryRules,
                 currency: currency,
                 monthlyTotal: BudgetRuleSubCategoryService.monthlyTotal(for: subCategoryRules),
+                scheduledOnly: BudgetRuleSubCategoryService.hasScheduledOnlyRules(in: subCategoryRules),
                 isExpanded: isExpandedBinding(for: subCategory.id),
                 canReorder: canReorder,
+                onAddNewItem: {
+                    startNewRule(in: subCategory)
+                },
                 onRename: {
                     subCategoryPendingRename = subCategory
                     subCategoryRenameTitle = subCategory.title
@@ -429,11 +444,14 @@ struct BudgetRulesListView: View {
                 onDelete: {
                     subCategoryPendingDelete = subCategory
                 },
-                onMoveRules: canReorder ? { source, destination in
-                    moveRules(in: subCategoryRules, from: source, to: destination)
+                onReorderRule: canReorder ? { ruleID, index in
+                    reorderRule(ruleID: ruleID, toIndex: index, in: subCategoryRules)
+                } : nil,
+                onDropRule: canReorder ? { ruleID in
+                    moveRuleToSubCategory(ruleID: ruleID, subCategory: subCategory)
                 } : nil
             ) { rule in
-                ruleRow(rule)
+                ruleRow(rule, showDragHandle: true)
             }
             .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
         }
@@ -459,7 +477,7 @@ struct BudgetRulesListView: View {
     ) -> some View {
         if canReorder {
             ForEach(groupRules, id: \.id) { rule in
-                ruleRow(rule)
+                ruleRow(rule, showDragHandle: true)
             }
             .onMove(perform: move)
         } else {
@@ -469,8 +487,18 @@ struct BudgetRulesListView: View {
         }
     }
 
-    private func ruleRow(_ rule: BudgetRule) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+    @ViewBuilder
+    private func ruleRow(_ rule: BudgetRule, showDragHandle: Bool = false) -> some View {
+        let row = HStack(alignment: .firstTextBaseline, spacing: 12) {
+            if showDragHandle {
+                Image(systemName: "line.3.horizontal")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 16)
+                    .accessibilityLabel("Drag to reorder")
+                    .modifier(RuleDragSourceModifier(ruleID: rule.id, isEnabled: canReorder))
+            }
+
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(rule.name)
@@ -497,8 +525,19 @@ struct BudgetRulesListView: View {
         }
         .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
         .tag(rule)
-        .help(canReorder ? "Drag to reorder within this group" : "")
+        .contentShape(Rectangle())
+        .onActivitySelectionTap(
+            onSelect: { selectedRule = rule },
+            onEdit: { selectedRule = rule }
+        )
+        .help(canReorder ? (showDragHandle ? "Drag to reorder within this sub-category" : "Drag onto a sub-category to categorise") : "")
         .contextMenu {
+            Button {
+                selectedRule = rule
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            Divider()
             if rule.isArchived {
                 Button("Restore") { restore(rule) }
                 Divider()
@@ -509,6 +548,8 @@ struct BudgetRulesListView: View {
                 Button("Archive") { archive(rule) }
             }
         }
+
+        row
     }
 
     private func ruleAmountLabel(_ rule: BudgetRule) -> String {
@@ -633,6 +674,36 @@ struct BudgetRulesListView: View {
     private func moveRules(in groupRules: [BudgetRule], from source: IndexSet, to destination: Int) {
         var ordered = groupRules
         ordered.move(fromOffsets: source, toOffset: destination)
+        persistRuleOrder(ordered)
+    }
+
+    private func reorderRule(ruleID: UUID, toIndex: Int, in groupRules: [BudgetRule]) -> Bool {
+        guard let sourceIndex = groupRules.firstIndex(where: { $0.id == ruleID }) else {
+            return false
+        }
+        if sourceIndex == toIndex {
+            return false
+        }
+
+        var ordered = groupRules
+        let toOffset: Int
+        if toIndex >= ordered.count {
+            toOffset = ordered.count
+        } else if sourceIndex < toIndex {
+            toOffset = toIndex + 1
+        } else {
+            toOffset = toIndex
+        }
+
+        let before = ordered
+        ordered.move(fromOffsets: IndexSet(integer: sourceIndex), toOffset: toOffset)
+        guard ordered != before else { return false }
+
+        persistRuleOrder(ordered)
+        return true
+    }
+
+    private func persistRuleOrder(_ ordered: [BudgetRule]) {
         do {
             try BudgetRuleService.persistDisplayOrder(ordered, in: modelContext)
         } catch {
@@ -640,8 +711,28 @@ struct BudgetRulesListView: View {
         }
     }
 
+    private func moveRuleToSubCategory(ruleID: UUID, subCategory: BudgetRuleSubCategory) -> Bool {
+        let moved = BudgetRuleSubCategoryService.moveRule(
+            withID: ruleID,
+            to: subCategory,
+            rules: rules,
+            tiles: tiles,
+            in: modelContext
+        )
+        if moved {
+            expandedSubCategoryIDs.insert(subCategory.id)
+        }
+        return moved
+    }
+
     private func startFromTemplate(_ template: BudgetRuleStarterTemplate) {
         newRuleTemplate = template
+        showingNewRule = true
+    }
+
+    private func startNewRule(in subCategory: BudgetRuleSubCategory) {
+        newRuleSubCategory = subCategory
+        expandedSubCategoryIDs.insert(subCategory.id)
         showingNewRule = true
     }
 
@@ -772,11 +863,14 @@ struct BudgetRulesListView: View {
             let subCategoryRules = BudgetRuleSubCategoryService.rules(in: subCategory, from: rules)
             guard !subCategoryRules.isEmpty else { continue }
             let total = BudgetRuleSubCategoryService.monthlyTotal(for: subCategoryRules)
+            let scheduledOnly = BudgetRuleSubCategoryService.hasScheduledOnlyRules(in: subCategoryRules)
             groups.append(
                 PrintableBudgetRuleSubCategoryGroup(
                     id: subCategory.id,
                     title: subCategory.title,
-                    subtotal: "\(MoneyFormatter.format(minorUnits: total, currency: currency)) / mo",
+                    subtotal: scheduledOnly
+                        ? "On calendar"
+                        : "\(MoneyFormatter.format(minorUnits: total, currency: currency)) / mo",
                     rows: printableRows(for: subCategoryRules)
                 )
             )
@@ -808,6 +902,19 @@ private struct GenerateTilesAlert: Identifiable {
     let id = UUID()
     let title: String
     let message: String
+}
+
+private struct RuleDragSourceModifier: ViewModifier {
+    let ruleID: UUID
+    let isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.draggable(ruleID.uuidString)
+        } else {
+            content
+        }
+    }
 }
 
 private struct BudgetRulesEmptyState: View {

@@ -50,11 +50,11 @@ struct DashboardPrintView: View {
     private var accountSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Account balances")
-                .font(.title3.weight(.semibold))
+                .font(PrintTypography.sectionTitle)
 
             if accounts.isEmpty {
                 Text("No accounts configured.")
-                    .font(.subheadline)
+                    .font(PrintTypography.body)
                     .foregroundStyle(.secondary)
             } else {
                 PrintTableHeader(
@@ -77,10 +77,10 @@ struct DashboardPrintView: View {
                 if let endOfPlanLabel, let endOfPlanBalance {
                     HStack {
                         Text("End of plan (\(endOfPlanLabel))")
-                            .font(.subheadline.weight(.semibold))
+                            .font(PrintTypography.bodySemibold)
                         Spacer()
                         Text(MoneyFormatter.format(minorUnits: endOfPlanBalance, currency: currency))
-                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .font(PrintTypography.amountSemibold)
                     }
                     .padding(.top, 6)
                 }
@@ -91,10 +91,10 @@ struct DashboardPrintView: View {
     private var forecastSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Forecast")
-                .font(.title3.weight(.semibold))
+                .font(PrintTypography.sectionTitle)
 
             Text("Projected closing balance by month.")
-                .font(.subheadline)
+                .font(PrintTypography.body)
                 .foregroundStyle(.secondary)
 
             let accountIDs = forecastAccountIDs

@@ -56,7 +56,7 @@ final class FeatureGateService {
             case .extendedForecast: "Extra plan years (4+)"
             case .scenarios: "Scenario planning"
             case .holidayPlanner: "Holiday & event planner"
-            case .csvImport: "CSV / QBO import"
+            case .csvImport: "CSV / QBO / OFX (Open Financial Exchange) import"
             case .impactView: "What changed / impact view"
             case .largePaymentWarnings: "Large payment warnings"
             case .ruleExpiryWarnings: "Rule expiry warnings"

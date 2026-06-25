@@ -35,7 +35,7 @@ struct BudgetRulesPrintView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Recurring income and expenses that generate tiles in your monthly plan.")
-                .font(.subheadline)
+                .font(PrintTypography.body)
                 .foregroundStyle(.secondary)
 
             summarySection
@@ -65,10 +65,10 @@ struct BudgetRulesPrintView: View {
             ForEach(content.groups) { group in
                 HStack {
                     Text(group.title)
-                        .font(.subheadline.weight(.semibold))
+                        .font(PrintTypography.bodySemibold)
                     Spacer()
                     Text(group.subtotal)
-                        .font(.subheadline.monospacedDigit())
+                        .font(PrintTypography.amount)
                 }
                 .padding(.vertical, 4)
                 ForEach(group.rows) { rule in
@@ -84,7 +84,7 @@ struct BudgetRulesPrintView: View {
             if !content.ungrouped.isEmpty {
                 if !content.groups.isEmpty {
                     Text("Uncategorised")
-                        .font(.caption.weight(.semibold))
+                        .font(PrintTypography.sectionHeader)
                         .foregroundStyle(.secondary)
                         .padding(.top, 4)
                 }

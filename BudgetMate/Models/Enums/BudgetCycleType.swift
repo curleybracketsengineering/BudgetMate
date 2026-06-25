@@ -39,4 +39,31 @@ enum BudgetCycleType: String, Codable, CaseIterable, Identifiable {
         case .oneOff: ""
         }
     }
+
+    /// Regular recurring cycles count toward monthly summaries; date-scheduled cycles appear on the plan calendar only.
+    /// Every-4-weeks rules count one full payment per typical month (not annualised).
+    var countsTowardMonthlySummary: Bool {
+        switch self {
+        case .monthly, .weekly, .everyFourWeeks, .tenMonthly, .custom:
+            true
+        case .quarterly, .twiceYearly, .yearly, .oneOff:
+            false
+        }
+    }
+
+    /// Label for the amount row in rule detail when the cycle is not smoothed monthly.
+    var ruleSummaryAmountLabel: String {
+        switch self {
+        case .monthly, .weekly, .everyFourWeeks, .tenMonthly, .custom:
+            "Per month"
+        case .quarterly:
+            "Per quarter"
+        case .twiceYearly:
+            "Per payment"
+        case .yearly:
+            "Per year"
+        case .oneOff:
+            "Amount"
+        }
+    }
 }

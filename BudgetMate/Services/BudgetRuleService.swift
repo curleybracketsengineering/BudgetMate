@@ -56,7 +56,9 @@ enum BudgetRuleService {
     }
 
     static func monthlyEquivalent(for rule: BudgetRule) -> Int {
-        if rule.monthlyEquivalentMinorUnits > 0 {
+        guard rule.cycle.countsTowardMonthlySummary else { return 0 }
+        // Every-4-weeks rules always recalculate so a stored 13/12 smoothed value cannot linger.
+        if rule.cycle != .everyFourWeeks, rule.monthlyEquivalentMinorUnits > 0 {
             return rule.monthlyEquivalentMinorUnits
         }
         return calculatedMonthlyEquivalent(for: rule)

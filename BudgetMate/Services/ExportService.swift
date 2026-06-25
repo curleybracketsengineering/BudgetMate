@@ -45,6 +45,55 @@ enum ExportService {
         return Data((lines.joined(separator: "\n") + "\n").utf8)
     }
 
+    static func monthDetailsCSVData(details: [PrintableMonthDetail], currency: AppCurrency) -> Data {
+        let sections = details.map { monthDetailCSVLines(detail: $0, currency: currency) }
+        return Data((sections.joined(separator: "\n\n") + "\n").utf8)
+    }
+
+    private static func monthDetailCSVLines(detail: PrintableMonthDetail, currency: AppCurrency) -> String {
+        var lines = [
+            "Metric,Value",
+            "\(csvField("Month")),\(csvField(detail.title))",
+            "\(csvField("Opening")),\(csvField(MoneyFormatter.majorUnitsString(minorUnits: detail.openingMinorUnits, currency: currency)))",
+            "\(csvField("Income")),\(csvField(MoneyFormatter.majorUnitsString(minorUnits: detail.incomeMinorUnits, currency: currency)))",
+            "\(csvField("Expenses")),\(csvField(MoneyFormatter.majorUnitsString(minorUnits: detail.expenseMinorUnits, currency: currency)))",
+            "\(csvField("Savings")),\(csvField(MoneyFormatter.majorUnitsString(minorUnits: detail.savingMinorUnits, currency: currency)))",
+            "\(csvField("Locked")),\(detail.isLocked ? "Yes" : "No")",
+            ""
+        ]
+
+        if !detail.accountBalances.isEmpty {
+            lines.append("Account,Opening")
+            for account in detail.accountBalances {
+                lines.append([
+                    csvField(account.name),
+                    csvField(MoneyFormatter.majorUnitsString(minorUnits: account.openingMinorUnits, currency: currency))
+                ].joined(separator: ","))
+            }
+            lines.append("")
+        }
+
+        lines.append("Section,Name,Details,Amount")
+        for section in detail.sections {
+            lines.append([
+                csvField("\(section.title) total"),
+                csvField(""),
+                csvField(""),
+                csvField(MoneyFormatter.majorUnitsString(minorUnits: section.totalMinorUnits, currency: currency))
+            ].joined(separator: ","))
+            for row in section.rows {
+                lines.append([
+                    csvField(section.title),
+                    csvField(row.name),
+                    csvField(row.metadata),
+                    csvField(MoneyFormatter.majorUnitsString(minorUnits: row.amountMinorUnits, currency: currency))
+                ].joined(separator: ","))
+            }
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
     static func budgetRulesCSVData(
         summary: BudgetRuleService.Summary,
         currency: AppCurrency,

@@ -3,11 +3,13 @@ import Foundation
 enum BankImportFormat: String {
     case csv
     case qbo
+    case ofx
 
     var displayName: String {
         switch self {
         case .csv: "CSV"
-        case .qbo: "QBO (OFX)"
+        case .qbo: "QBO"
+        case .ofx: "OFX"
         }
     }
 }
@@ -17,7 +19,7 @@ enum BankFileParser {
         case unsupportedFormat
 
         var errorDescription: String? {
-            "This file format is not supported. Choose a bank CSV or QBO (OFX) export."
+            "This file format is not supported. Choose a bank CSV, QBO, or OFX (Open Financial Exchange) export."
         }
     }
 
@@ -36,11 +38,12 @@ enum BankFileParser {
 
     static func parse(content: String, filename: String? = nil) throws -> ParseResult {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        let extensionHint = filename?.lowercased().hasSuffix(".qbo") == true ? BankImportFormat.qbo : nil
+        let extensionHint = importFormat(from: filename)
 
-        if extensionHint == .qbo || isQBOFormat(trimmed) {
+        if extensionHint == .ofx || extensionHint == .qbo || isOFXFormat(trimmed) {
+            let format = extensionHint ?? .ofx
             let transactions = try BankQBOParser.parse(content: trimmed)
-            return ParseResult(format: .qbo, transactions: transactions)
+            return ParseResult(format: format, transactions: transactions)
         }
 
         if isCSVFormat(trimmed) {
@@ -51,7 +54,14 @@ enum BankFileParser {
         throw ParseError.unsupportedFormat
     }
 
-    private static func isQBOFormat(_ content: String) -> Bool {
+    private static func importFormat(from filename: String?) -> BankImportFormat? {
+        guard let lowercased = filename?.lowercased() else { return nil }
+        if lowercased.hasSuffix(".ofx") { return .ofx }
+        if lowercased.hasSuffix(".qbo") { return .qbo }
+        return nil
+    }
+
+    private static func isOFXFormat(_ content: String) -> Bool {
         content.hasPrefix("OFXHEADER:")
             || content.contains("<OFX>")
             || content.contains("<STMTTRN>")

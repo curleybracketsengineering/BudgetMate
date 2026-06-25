@@ -42,8 +42,8 @@ struct HolidayDrivingRouteButton: View {
 
 extension HolidayDrivingRouteButton {
     init(activity: HolidayActivity, holiday: Holiday, style: Style = .icon) {
-        self.origin = HolidayItineraryService.resolvedOriginName(activity: activity)
-        self.destination = HolidayItineraryService.resolvedDestinationName(activity: activity, holiday: holiday)
+        self.origin = HolidayItineraryService.explicitOriginName(activity: activity)
+        self.destination = HolidayItineraryService.explicitDestinationName(activity: activity)
         self.countryName = HolidayItineraryService.resolvedCountryName(activity: activity, holiday: holiday)
         self.style = style
     }

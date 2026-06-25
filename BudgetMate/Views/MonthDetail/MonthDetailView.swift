@@ -104,7 +104,6 @@ struct MonthDetailView: View {
             SummaryCard(title: "Income", amount: MoneyFormatter.format(minorUnits: totals.income, currency: currency), tint: .green)
             SummaryCard(title: "Expenses", amount: MoneyFormatter.format(minorUnits: totals.expense, currency: currency), tint: .red)
             SummaryCard(title: "Savings", amount: MoneyFormatter.format(minorUnits: totals.saving, currency: currency))
-            SummaryCard(title: "Closing", amount: MoneyFormatter.format(minorUnits: aggregateClosingMinorUnits, currency: currency), tint: .primary)
         }
     }
 
@@ -114,7 +113,6 @@ struct MonthDetailView: View {
                 .font(.title3.weight(.semibold))
 
             accountBalanceSection("Opening", keyPath: \.openingBalanceMinorUnits)
-            accountBalanceSection("Closing", keyPath: \.closingBalanceMinorUnits, bold: true)
         }
     }
 

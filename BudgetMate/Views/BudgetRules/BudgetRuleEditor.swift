@@ -398,7 +398,9 @@ enum BudgetRuleEditor {
             || monthPatternRaw != snapshot.monthPatternRaw
             || startDate != snapshot.startDate
         if amountChanged || scheduleChanged {
-            rule.monthlyEquivalentMinorUnits = BudgetRuleService.calculatedMonthlyEquivalent(for: rule)
+            rule.monthlyEquivalentMinorUnits = rule.cycle.countsTowardMonthlySummary
+                ? BudgetRuleService.calculatedMonthlyEquivalent(for: rule)
+                : 0
         }
 
         rule.markUpdated()

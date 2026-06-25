@@ -45,6 +45,31 @@ enum PlanningCalendar {
         return components.year == year && components.month == month
     }
 
+    /// Resolves the plan month for a date: the matching calendar month when present,
+    /// otherwise the first plan month if the date is before the horizon, or the last month if after.
+    static func planMonth(
+        for date: Date,
+        in sequence: [(year: Int, month: Int)],
+        calendar: Calendar = .current
+    ) -> (year: Int, month: Int)? {
+        guard !sequence.isEmpty else { return nil }
+        let components = calendar.dateComponents([.year, .month], from: date)
+        guard let year = components.year, let month = components.month else {
+            return sequence.first
+        }
+
+        if let exact = sequence.first(where: { $0.year == year && $0.month == month }) {
+            return exact
+        }
+
+        if let first = sequence.first,
+           compare(year1: year, month1: month, to: first.year, month2: first.month) == .orderedAscending {
+            return first
+        }
+
+        return sequence.last
+    }
+
     static func monthsBetween(
         from start: Date,
         to targetYear: Int,

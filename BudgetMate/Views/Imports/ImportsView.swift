@@ -143,7 +143,7 @@ struct ImportsView: View {
         .navigationTitle("Imports")
         .fileImporter(
             isPresented: $showingImporter,
-            allowedContentTypes: [.commaSeparatedText, .plainText, .data, .qbo],
+            allowedContentTypes: [.commaSeparatedText, .plainText, .data, .qbo, .ofx],
             allowsMultipleSelection: false
         ) { handleImport(result: $0) }
         .onAppear(perform: syncPayeeNotes)
@@ -164,7 +164,7 @@ struct ImportsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Bank import")
                         .font(.title2.weight(.semibold))
-                    Text("Import CSV or QBO (OFX) bank exports and map transactions to budget tiles.")
+                    Text("Import CSV, QBO, or OFX (Open Financial Exchange) bank exports and map transactions to budget tiles.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     if let importedFileName = importSession.importedFileName {
@@ -233,7 +233,7 @@ struct ImportsView: View {
                 ContentUnavailableView(
                     "No file loaded",
                     systemImage: "tray.and.arrow.down",
-                    description: Text("Choose a bank CSV or QBO (OFX) export to preview transactions before importing.")
+                    description: Text("Choose a bank CSV, QBO, or OFX (Open Financial Exchange) export to preview transactions before importing.")
                 )
                 Button {
                     showingImporter = true

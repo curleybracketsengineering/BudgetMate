@@ -82,25 +82,87 @@ struct MonthlyPlanView: View {
         .toolbar {
             ToolbarItemGroup {
                 Menu {
-                    #if os(macOS)
-                    Button {
-                        printMonthlyPlan()
-                    } label: {
-                        Label("Print…", systemImage: "printer")
-                    }
-                    #endif
+                    Section("Monthly") {
+                        #if os(macOS)
+                        Menu {
+                            ForEach(MonthlyPlanExportRange.allCases) { range in
+                                Button {
+                                    printMonthlyPlan(range: range)
+                                } label: {
+                                    Text(range.label)
+                                }
+                            }
+                        } label: {
+                            Label("Print…", systemImage: "printer")
+                        }
+                        #endif
 
-                    Button {
-                        exportMonthlyPlanPDF()
-                    } label: {
-                        Label("Save as PDF…", systemImage: "doc.richtext")
-                    }
+                        Menu {
+                            ForEach(MonthlyPlanExportRange.allCases) { range in
+                                Button {
+                                    exportMonthlyPlanPDF(range: range)
+                                } label: {
+                                    Text(range.label)
+                                }
+                            }
+                        } label: {
+                            Label("Save as PDF…", systemImage: "doc.richtext")
+                        }
 
-                    Button {
-                        exportMonthlyPlanCSV()
-                    } label: {
-                        Label("Save as CSV…", systemImage: "tablecells")
+                        Menu {
+                            ForEach(MonthlyPlanExportRange.allCases) { range in
+                                Button {
+                                    exportMonthlyPlanCSV(range: range)
+                                } label: {
+                                    Text(range.label)
+                                }
+                            }
+                        } label: {
+                            Label("Save as CSV…", systemImage: "tablecells")
+                        }
                     }
+                    .disabled(orderedMonths.isEmpty)
+
+                    Section("By month") {
+                        #if os(macOS)
+                        Menu {
+                            ForEach(MonthlyPlanExportRange.allCases) { range in
+                                Button {
+                                    printMonthDetail(range: range)
+                                } label: {
+                                    Text(range.label)
+                                }
+                            }
+                        } label: {
+                            Label("Print…", systemImage: "printer")
+                        }
+                        #endif
+
+                        Menu {
+                            ForEach(MonthlyPlanExportRange.allCases) { range in
+                                Button {
+                                    exportMonthDetailPDF(range: range)
+                                } label: {
+                                    Text(range.label)
+                                }
+                            }
+                        } label: {
+                            Label("Save as PDF…", systemImage: "doc.richtext")
+                        }
+
+                        Menu {
+                            ForEach(MonthlyPlanExportRange.allCases) { range in
+                                Button {
+                                    exportMonthDetailCSV(range: range)
+                                } label: {
+                                    Text(range.label)
+                                }
+                            }
+                        } label: {
+                            Label("Save as CSV…", systemImage: "tablecells")
+                        }
+                    }
+                    .disabled(orderedMonths.isEmpty)
                 } label: {
                     Label("Export", systemImage: "printer")
                 }
@@ -197,9 +259,31 @@ struct MonthlyPlanView: View {
     }
 
     private var printableMonthRows: [PrintableMonthRow] {
-        orderedMonths.map { month in
+        guard let settings else { return [] }
+        let hasMultipleAccounts = accounts.count > 1
+
+        return orderedMonths.map { month in
             let tiles = CashFlowService.tilesForMonth(year: month.year, month: month.month, from: allTiles)
             let totals = CashFlowService.totals(for: tiles)
+            let accountBalances = CashFlowService.accountBalances(
+                for: month,
+                accounts: accounts,
+                tiles: allTiles,
+                settings: settings
+            )
+            let accountOpenings: [PrintableAccountOpening] = hasMultipleAccounts
+                ? accounts.compactMap { account in
+                    guard let balance = accountBalances.first(where: { $0.accountId == account.id }) else {
+                        return nil
+                    }
+                    return PrintableAccountOpening(
+                        id: account.id,
+                        name: account.name,
+                        openingMinorUnits: balance.openingBalanceMinorUnits
+                    )
+                }
+                : []
+
             return PrintableMonthRow(
                 id: month.id,
                 title: month.displayTitle,
@@ -207,36 +291,115 @@ struct MonthlyPlanView: View {
                 income: totals.income,
                 expense: totals.expense,
                 closing: month.closingBalanceMinorUnits,
-                isLocked: month.isLocked
+                isLocked: month.isLocked,
+                accountOpenings: accountOpenings
             )
         }
     }
 
-    private func monthlyPlanPrintView(for settings: AppSettings) -> MonthlyPlanPrintView {
-        MonthlyPlanPrintView(
+    private func printMonthlyPlan(range: MonthlyPlanExportRange) {
+        guard let settings else { return }
+        let rows = printableMonthRows
+        let months = range.selectedMonths(from: rows)
+        guard !months.isEmpty else { return }
+        let pages = MonthlyPlanPrintDocument.pageViews(
             currency: settings.currency,
-            months: printableMonthRows,
-            horizonLabel: PlanningHorizon.label(forMonths: settings.horizonMonths)
+            settings: settings,
+            months: months,
+            horizonLabel: range.horizonLabel(
+                from: rows,
+                fullHorizonLabel: PlanningHorizon.label(forMonths: settings.horizonMonths)
+            )
+        )
+        PrintService.printPaginated(title: "Monthly Plan", orientation: .landscape, pages: pages)
+    }
+
+    private func exportMonthlyPlanPDF(range: MonthlyPlanExportRange) {
+        guard let settings else { return }
+        let rows = printableMonthRows
+        let months = range.selectedMonths(from: rows)
+        guard !months.isEmpty else { return }
+        let pages = MonthlyPlanPrintDocument.pageViews(
+            currency: settings.currency,
+            settings: settings,
+            months: months,
+            horizonLabel: range.horizonLabel(
+                from: rows,
+                fullHorizonLabel: PlanningHorizon.label(forMonths: settings.horizonMonths)
+            )
+        )
+        PrintService.exportPaginatedPDF(title: "Monthly Plan", orientation: .landscape, pages: pages)
+    }
+
+    private func exportMonthlyPlanCSV(range: MonthlyPlanExportRange) {
+        guard let settings else { return }
+        let rows = printableMonthRows
+        let months = range.selectedMonths(from: rows)
+        guard !months.isEmpty else { return }
+        let data = ExportService.csvData(rows: months, currency: settings.currency)
+        ExportService.saveCSV(data: data, suggestedFilename: "Monthly Plan.csv")
+    }
+
+    private func selectedPlanMonths(for range: MonthlyPlanExportRange) -> [BudgetMonth] {
+        range.selectedItems(from: orderedMonths)
+    }
+
+    private func printableMonthDetails(for months: [BudgetMonth]) -> [PrintableMonthDetail] {
+        guard let settings else { return [] }
+        return months.map { month in
+            MonthDetailPrintDocument.build(
+                month: month,
+                tiles: allTiles,
+                rules: rules,
+                accounts: accounts,
+                settings: settings
+            )
+        }
+    }
+
+    private func monthDetailExportTitle(range: MonthlyPlanExportRange) -> String {
+        guard let settings else { return "Monthly Detail" }
+        let label = range.horizonLabel(
+            from: printableMonthRows,
+            fullHorizonLabel: PlanningHorizon.label(forMonths: settings.horizonMonths)
+        )
+        return "\(label) Detail"
+    }
+
+    private func monthDetailPages(currency: AppCurrency, details: [PrintableMonthDetail]) -> [CurrentMonthDetailPrintView] {
+        details.map { CurrentMonthDetailPrintView(currency: currency, detail: $0) }
+    }
+
+    private func printMonthDetail(range: MonthlyPlanExportRange) {
+        guard let settings else { return }
+        let months = selectedPlanMonths(for: range)
+        let details = printableMonthDetails(for: months)
+        guard !details.isEmpty else { return }
+        PrintService.printPaginated(
+            title: monthDetailExportTitle(range: range),
+            orientation: .landscape,
+            pages: monthDetailPages(currency: settings.currency, details: details)
         )
     }
 
-    private func printMonthlyPlan() {
+    private func exportMonthDetailPDF(range: MonthlyPlanExportRange) {
         guard let settings else { return }
-        PrintService.print(title: "Monthly Plan") {
-            monthlyPlanPrintView(for: settings)
-        }
+        let months = selectedPlanMonths(for: range)
+        let details = printableMonthDetails(for: months)
+        guard !details.isEmpty else { return }
+        PrintService.exportPaginatedPDF(
+            title: monthDetailExportTitle(range: range),
+            orientation: .landscape,
+            pages: monthDetailPages(currency: settings.currency, details: details)
+        )
     }
 
-    private func exportMonthlyPlanPDF() {
+    private func exportMonthDetailCSV(range: MonthlyPlanExportRange) {
         guard let settings else { return }
-        PrintService.exportPDF(title: "Monthly Plan") {
-            monthlyPlanPrintView(for: settings)
-        }
-    }
-
-    private func exportMonthlyPlanCSV() {
-        guard let settings else { return }
-        let data = ExportService.csvData(rows: printableMonthRows, currency: settings.currency)
-        ExportService.saveCSV(data: data, suggestedFilename: "Monthly Plan.csv")
+        let months = selectedPlanMonths(for: range)
+        let details = printableMonthDetails(for: months)
+        guard !details.isEmpty else { return }
+        let data = ExportService.monthDetailsCSVData(details: details, currency: settings.currency)
+        ExportService.saveCSV(data: data, suggestedFilename: "\(monthDetailExportTitle(range: range)).csv")
     }
 }

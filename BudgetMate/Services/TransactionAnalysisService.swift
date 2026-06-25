@@ -439,10 +439,8 @@ enum TransactionAnalysisService {
         activeMonthCount: Int
     ) -> Int {
         switch cycle {
-        case .monthly, .weekly:
+        case .monthly, .weekly, .everyFourWeeks:
             return perOccurrence
-        case .everyFourWeeks:
-            return Int((Double(perOccurrence) * 13.0 / 12.0).rounded())
         case .tenMonthly:
             let months = activeMonthCount > 0 ? activeMonthCount : 10
             return Int((Double(perOccurrence) * Double(months) / 12.0).rounded())

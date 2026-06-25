@@ -79,8 +79,8 @@ enum HolidayTravelEstimateService {
     static func routeSummaryLabel(activity: HolidayActivity, holiday: Holiday) -> String? {
         guard activity.kind.hasFromToFields else { return nil }
 
-        let from = HolidayItineraryService.resolvedOriginName(activity: activity)
-        let to = HolidayItineraryService.resolvedDestinationName(activity: activity, holiday: holiday)
+        let from = HolidayItineraryService.explicitOriginName(activity: activity)
+        let to = HolidayItineraryService.explicitDestinationName(activity: activity)
         var parts: [String] = []
 
         if !from.isEmpty, !to.isEmpty {

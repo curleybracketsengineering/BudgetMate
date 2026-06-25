@@ -53,12 +53,6 @@ struct MonthCardView: View {
             row("Income", income, tint: .green)
             row("Expenses", expense, tint: .red)
             row("Net", netMinorUnits, tint: netMinorUnits >= 0 ? .green : .red)
-            Divider()
-            if hasMultipleAccounts {
-                accountBalanceSection("Closing", keyPath: \.closingBalanceMinorUnits, bold: true)
-            } else {
-                row("Closing", month.closingBalanceMinorUnits, bold: true)
-            }
 
             RoundedRectangle(cornerRadius: 2)
                 .fill(accentColor)

@@ -44,6 +44,18 @@ struct BudgetRuleDetailView: View {
         BudgetRuleService.monthlyEquivalent(for: rule)
     }
 
+    private var summaryAmountMinorUnits: Int {
+        rule.cycle.countsTowardMonthlySummary ? monthlyEquivalent : rule.amountMinorUnits
+    }
+
+    private var scheduledMonthSummary: String? {
+        guard !rule.cycle.countsTowardMonthlySummary,
+              let settings = settingsList.first else { return nil }
+        let labels = BudgetGenerationService.scheduledMonthLabels(for: rule, settings: settings)
+        guard !labels.isEmpty else { return nil }
+        return labels.joined(separator: ", ")
+    }
+
     private var linkedTileCount: Int {
         tiles.filter { $0.linkedRuleId == rule.id && $0.isActive }.count
     }
@@ -84,9 +96,15 @@ struct BudgetRuleDetailView: View {
                 LabeledContent("Status") {
                     statusLabel
                 }
-                LabeledContent("Per month") {
-                    Text(MoneyFormatter.format(minorUnits: monthlyEquivalent, currency: currency))
+                LabeledContent(rule.cycle.ruleSummaryAmountLabel) {
+                    Text(MoneyFormatter.format(minorUnits: summaryAmountMinorUnits, currency: currency))
                         .foregroundStyle(type == .income ? .green : .primary)
+                }
+                if let scheduledMonthSummary {
+                    LabeledContent("In plan") {
+                        Text(scheduledMonthSummary)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if linkedTileCount > 0 {
                     LabeledContent("Tiles") {
@@ -132,6 +150,7 @@ struct BudgetRuleDetailView: View {
             }
         }
         .formStyle(.grouped)
+        .contentMargins(.bottom, 20, for: .scrollContent)
         .navigationTitle(name.isEmpty ? "Rule" : name)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {

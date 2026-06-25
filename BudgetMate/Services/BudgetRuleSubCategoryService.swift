@@ -187,6 +187,12 @@ enum BudgetRuleSubCategoryService {
             .reduce(0, +)
     }
 
+    static func hasScheduledOnlyRules(in rules: [BudgetRule]) -> Bool {
+        let active = rules.filter { $0.isActive && !$0.isArchived }
+        guard !active.isEmpty else { return false }
+        return active.allSatisfy { !$0.cycle.countsTowardMonthlySummary }
+    }
+
     static func rules(
         in subCategory: BudgetRuleSubCategory,
         from allRules: [BudgetRule]
@@ -205,5 +211,31 @@ enum BudgetRuleSubCategoryService {
             visibleSubCategories.flatMap { rules(in: $0, from: allRules).map(\.id) }
         )
         return BudgetRuleService.sorted(groupRules.filter { !categorisedIDs.contains($0.id) })
+    }
+
+    @discardableResult
+    static func moveRule(
+        withID ruleID: UUID,
+        to subCategory: BudgetRuleSubCategory,
+        rules allRules: [BudgetRule],
+        tiles: [BudgetTile],
+        in context: ModelContext
+    ) -> Bool {
+        guard let rule = allRules.first(where: { $0.id == ruleID }) else { return false }
+        let ruleGroup = BudgetRuleService.OrderGroup.forType(rule.type)
+        guard ruleGroup == subCategory.orderGroup else { return false }
+        if rule.subCategory?.id == subCategory.id { return false }
+
+        let targetRules = rules(in: subCategory, from: allRules).filter { $0.id != rule.id }
+        rule.subCategory = subCategory
+        rule.displayOrder = (targetRules.map(\.displayOrder).max() ?? -1) + 1
+        rule.markUpdated()
+
+        for tile in BudgetRuleService.recurringTiles(for: rule, in: tiles) {
+            tile.subCategory = subCategory
+        }
+
+        try? context.save()
+        return true
     }
 }

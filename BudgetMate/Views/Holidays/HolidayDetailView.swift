@@ -3,9 +3,6 @@ import SwiftData
 
 struct HolidayDetailView: View {
     @Environment(\.modelContext) private var modelContext
-    @Environment(\.openURL) private var openURL
-    @Environment(TravelSearchStore.self) private var travelSearch
-    @Environment(FeatureGateService.self) private var featureGate
     @Query private var settingsList: [AppSettings]
     @Query private var months: [BudgetMonth]
     @Query private var tiles: [BudgetTile]
@@ -15,7 +12,6 @@ struct HolidayDetailView: View {
 
     @State private var showingEditHoliday = false
     @State private var addActivityContext: HolidayAddActivityContext?
-    @State private var showingImportDescription = false
     @State private var editingActivity: HolidayActivity?
     @State private var activityPendingDeletion: HolidayActivity?
     @State private var commitError: String?
@@ -113,7 +109,6 @@ struct HolidayDetailView: View {
             onPaste: pasteFromKeyboard
         )
         .navigationTitle(holiday.name.isEmpty ? "Holiday" : holiday.name)
-        .toolbar { toolbarContent }
         .sheet(isPresented: $showingEditHoliday) {
             HolidayFormView(currency: currency, existingHoliday: holiday)
         }
@@ -127,9 +122,6 @@ struct HolidayDetailView: View {
         }
         .sheet(item: $editingActivity) { activity in
             HolidayActivityFormView(currency: currency, holiday: holiday, existingActivity: activity)
-        }
-        .sheet(isPresented: $showingImportDescription) {
-            HolidayDescriptionImportView(currency: currency, holiday: holiday)
         }
         .confirmationDialog(
             "Delete activity?",
@@ -153,6 +145,22 @@ struct HolidayDetailView: View {
     @ViewBuilder
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button {
+                    addActivityContext = HolidayAddActivityContext()
+                } label: {
+                    Label("Add activity", systemImage: "plus")
+                }
+                .buttonStyle(.bordered)
+
+                Button("Edit trip") {
+                    showingEditHoliday = true
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+            }
+
             if !holiday.destination.isEmpty || !holiday.origin.isEmpty {
                 Label(
                     [holiday.origin, holiday.destination].filter { !$0.isEmpty }.joined(separator: " → "),
@@ -223,7 +231,6 @@ struct HolidayDetailView: View {
 
     @ViewBuilder
     private var planContent: some View {
-        travelSearchSection
         activitiesSection
         totalSection
         commitSection
@@ -240,31 +247,6 @@ struct HolidayDetailView: View {
             pasteTargetTripDay: $pasteTargetTripDay,
             onKeyboardFocus: { holidayKeyboardFocused = true }
         )
-    }
-
-    @ViewBuilder
-    private var travelSearchSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Find prices")
-                .font(.headline)
-            Text("Open a travel site with your trip details pre-filled, then copy amounts back into activities.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 12) {
-                searchButton("Flights", systemImage: "airplane") {
-                    openSearch(kind: .flights)
-                }
-                searchButton("Hotels", systemImage: "bed.double") {
-                    openSearch(kind: .hotels)
-                }
-                searchButton("Car hire", systemImage: "car") {
-                    openSearch(kind: .carHire)
-                }
-            }
-        }
-        .padding()
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
     }
 
     @ViewBuilder
@@ -567,74 +549,6 @@ struct HolidayDetailView: View {
                 .buttonStyle(.bordered)
             }
         }
-    }
-
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Button {
-                    addActivityContext = HolidayAddActivityContext()
-                } label: {
-                    Label("Add activity", systemImage: "plus")
-                }
-                if featureGate.isAvailable(.holidayPlanner) {
-                    Button {
-                        showingImportDescription = true
-                    } label: {
-                        Label("Import from description", systemImage: "sparkles")
-                    }
-                    .disabled(HolidayDescriptionImportService.availabilityMessage() != nil)
-                }
-                Button("Edit trip") {
-                    showingEditHoliday = true
-                }
-            } label: {
-                Label("Trip actions", systemImage: "ellipsis.circle")
-            }
-        }
-    }
-
-    private func searchButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.bordered)
-    }
-
-    private enum SearchKind {
-        case flights, hotels, carHire
-    }
-
-    private func openSearch(kind: SearchKind) {
-        let url: URL?
-        switch kind {
-        case .flights:
-            url = TravelDeepLinkService.flightSearchURL(
-                provider: travelSearch.flightSearchProvider,
-                origin: holiday.origin,
-                destination: holiday.destination,
-                startDate: holiday.plannedStartDate,
-                endDate: holiday.plannedEndDate
-            )
-        case .hotels:
-            url = TravelDeepLinkService.hotelSearchURL(
-                provider: travelSearch.hotelSearchProvider,
-                destination: holiday.destination,
-                startDate: holiday.plannedStartDate,
-                endDate: holiday.plannedEndDate
-            )
-        case .carHire:
-            url = TravelDeepLinkService.carHireSearchURL(
-                provider: travelSearch.carHireSearchProvider,
-                destination: holiday.destination,
-                startDate: holiday.plannedStartDate,
-                endDate: holiday.plannedEndDate
-            )
-        }
-        guard let url else { return }
-        openURL(url)
     }
 
     private func commitToPlan() {

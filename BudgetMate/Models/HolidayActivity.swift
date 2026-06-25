@@ -12,9 +12,9 @@ final class HolidayActivity {
     var plannedMonth: Int = 0
     var plannedStartDate: Date?
     var plannedEndDate: Date?
-    /// Departure city or place for transport legs. Empty means infer from the activity name when possible.
+    /// Departure city or place for transport legs. Empty means no map stop.
     var fromLocationName: String = ""
-    /// Arrival city, town, or airport shown on the trip map. Empty means infer from the activity name.
+    /// Arrival city, town, or airport shown on the trip map. Empty means no map stop.
     var locationName: String = ""
     /// Country used to disambiguate map geocoding. Empty inherits the trip default.
     var countryName: String = ""
